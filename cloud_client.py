@@ -6,21 +6,21 @@ import time
 
 DEVICE_ID = "laptop_001"
 
-# ✅ Your REAL Render WebSocket URL
-CLOUD_URL = "wss://zephyr-altair-ai-server.onrender.com"
+# ✅ CORRECT WebSocket URL (VERY IMPORTANT)
+CLOUD_URL = "wss://zephyr-altair-ai-server.onrender.com/ws"
 
 # ✅ Local AI server
 LOCAL_SERVER = "http://127.0.0.1:5001"
 
 
 async def connect():
-    while True:  # 🔁 Auto-reconnect loop
+    while True:
         try:
             print("🚀 Connecting to Zephyr Cloud...")
 
             async with websockets.connect(CLOUD_URL) as websocket:
 
-                # 🔐 REGISTER DEVICE
+                # REGISTER DEVICE
                 await websocket.send(json.dumps({
                     "type": "register",
                     "device_id": DEVICE_ID
@@ -51,9 +51,7 @@ async def connect():
         except Exception as e:
             print("❌ Connection error:", e)
 
-        # ⏳ Wait before reconnect
         time.sleep(3)
 
 
-# ▶️ Start client
 asyncio.run(connect())

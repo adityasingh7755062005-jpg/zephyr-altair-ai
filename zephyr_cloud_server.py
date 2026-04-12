@@ -1,21 +1,21 @@
-import asyncio
 import json
-import websockets
-from fastapi import FastAPI
-import threading
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 
 app = FastAPI()
 
 clients = {}
 
 # =========================
-# WEBSOCKET HANDLER
+# WEBSOCKET ENDPOINT
 # =========================
-async def handler(websocket):
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    await websocket.accept()
     device_id = None
 
     try:
-        async for message in websocket:
+        while True:
+            message = await websocket.receive_text()
             data = json.loads(message)
 
             # REGISTER
@@ -30,7 +30,7 @@ async def handler(websocket):
                 action = data["action"]
 
                 if target in clients:
-                    await clients[target].send(json.dumps({
+                    await clients[target].send_text(json.dumps({
                         "type": "command",
                         "action": action
                     }))
@@ -38,7 +38,7 @@ async def handler(websocket):
                 else:
                     print(f"[Cloud] Target {target} not found")
 
-    except:
+    except WebSocketDisconnect:
         print(f"[Cloud] {device_id} disconnected")
 
     finally:
@@ -47,28 +47,8 @@ async def handler(websocket):
 
 
 # =========================
-# START WEBSOCKET SERVER
-# =========================
-async def start_ws():
-    print("[Cloud] WebSocket starting...")
-    server = await websockets.serve(handler, "0.0.0.0", 8765)
-    print("[Cloud] WS running on port 8765 🚀")
-    await server.wait_closed()
-
-
-def run_ws():
-    asyncio.run(start_ws())
-
-
-# =========================
-# FASTAPI ROUTE (for Render health check)
+# HEALTH CHECK (IMPORTANT FOR RENDER)
 # =========================
 @app.get("/")
 def home():
     return {"status": "Zephyr Cloud Running 🚀"}
-
-
-# =========================
-# START THREAD
-# =========================
-threading.Thread(target=run_ws, daemon=True).start()
