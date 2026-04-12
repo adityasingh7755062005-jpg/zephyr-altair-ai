@@ -1,0 +1,6 @@
+models/
+logs/
+intruders/
+memory/
+__pycache__/
+main_app.py
