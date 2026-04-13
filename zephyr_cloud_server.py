@@ -18,28 +18,28 @@ async def websocket_endpoint(websocket: WebSocket):
             message = await websocket.receive_text()
             data = json.loads(message)
 
-            # REGISTER
-            if data["type"] == "register":
-                device_id = data["device_id"]
+            # REGISTER DEVICE
+            if data.get("type") == "register":
+                device_id = data.get("device_id")
                 clients[device_id] = websocket
-                print(f"[Cloud] {device_id} connected")
+                print(f"[Cloud] ✅ {device_id} connected")
 
-            # FORWARD COMMAND
-            elif data["type"] == "command":
-                target = data["target"]
-                action = data["action"]
+            # FORWARD COMMAND (device → device)
+            elif data.get("type") == "command":
+                target = data.get("target")
+                action = data.get("action")
 
                 if target in clients:
                     await clients[target].send_text(json.dumps({
                         "type": "command",
                         "action": action
                     }))
-                    print(f"[Cloud] {action} sent to {target}")
+                    print(f"[Cloud] 📤 {action} sent to {target}")
                 else:
-                    print(f"[Cloud] Target {target} not found")
+                    print(f"[Cloud] ❌ Target {target} not found")
 
     except WebSocketDisconnect:
-        print(f"[Cloud] {device_id} disconnected")
+        print(f"[Cloud] ⚠️ {device_id} disconnected")
 
     finally:
         if device_id in clients:
@@ -47,8 +47,24 @@ async def websocket_endpoint(websocket: WebSocket):
 
 
 # =========================
-# HEALTH CHECK (IMPORTANT FOR RENDER)
+# HEALTH CHECK (RENDER)
 # =========================
 @app.get("/")
 def home():
     return {"status": "Zephyr Cloud Running 🚀"}
+
+
+# =========================
+# MANUAL COMMAND TRIGGER (VERY IMPORTANT)
+# =========================
+@app.get("/send/{target}/{action}")
+async def send_command(target: str, action: str):
+    if target in clients:
+        await clients[target].send_text(json.dumps({
+            "type": "command",
+            "action": action
+        }))
+        print(f"[Cloud] 🚀 {action} sent to {target}")
+        return {"status": f"{action} sent to {target}"}
+    else:
+        return {"error": "Device not connected"}

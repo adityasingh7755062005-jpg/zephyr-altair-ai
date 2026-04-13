@@ -16,7 +16,7 @@ LOCAL_SERVER = "http://127.0.0.1:5001"
 async def connect():
     while True:
         try:
-            print("🚀 Connecting to Zephyr Cloud...")
+            print("🚀 Waiting for server ...")
 
             async with websockets.connect(CLOUD_URL) as websocket:
 
