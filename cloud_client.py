@@ -5,7 +5,7 @@ import requests
 import time
 import hashlib
 
-DEVICE_ID = "laptop_001"
+DEVICE_ID = "160c02a2018e7132"
 
 # 🔐 SAME secret used during pairing (IMPORTANT)
 SECRET_KEY = "c63bd8f574f9634e3f50bda3fd5cce15"
