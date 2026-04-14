@@ -7,9 +7,17 @@ app = FastAPI()
 
 clients = {}
 
-# =========================
-# WEBSOCKET ENDPOINT
-# =========================
+# 🔐 SAME SECRET MAP (for testing manual endpoint)
+DEVICE_SECRETS = {
+    "160c02a2018e7132": "c63bd8f574f9634e3f50bda3fd5cce15"
+}
+
+
+def generate_token(device_id, secret_key, action, timestamp):
+    raw = f"{device_id}{secret_key}{timestamp}{action}"
+    return hashlib.sha256(raw.encode()).hexdigest()
+
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
@@ -20,13 +28,11 @@ async def websocket_endpoint(websocket: WebSocket):
             message = await websocket.receive_text()
             data = json.loads(message)
 
-            # REGISTER DEVICE
             if data.get("type") == "register":
                 device_id = data.get("device_id")
                 clients[device_id] = websocket
                 print(f"[Cloud] ✅ {device_id} connected")
 
-            # FORWARD COMMAND (WITH TOKEN + TIMESTAMP)
             elif data.get("type") == "command":
                 target = data.get("target")
                 action = data.get("action")
@@ -42,8 +48,6 @@ async def websocket_endpoint(websocket: WebSocket):
                     }))
 
                     print(f"[Cloud] 📤 {action} → {target}")
-                    print(f"        🕒 timestamp: {timestamp}")
-                    print(f"        🔑 token: {token}")
 
                 else:
                     print(f"[Cloud] ❌ Target {target} not found")
@@ -56,25 +60,22 @@ async def websocket_endpoint(websocket: WebSocket):
             del clients[device_id]
 
 
-# =========================
-# HEALTH CHECK (RENDER)
-# =========================
 @app.get("/")
 def home():
     return {"status": "Zephyr Cloud Running 🚀"}
 
 
-# =========================
-# MANUAL COMMAND TRIGGER (TESTING)
-# =========================
 @app.get("/send/{target}/{action}")
 async def send_command(target: str, action: str):
     if target in clients:
 
-        # 🔥 Generate TEMP token for testing
+        secret = DEVICE_SECRETS.get(target)
+
+        if not secret:
+            return {"error": "Unknown device"}
+
         timestamp = int(time.time())
-        raw = f"{target}_{action}_{timestamp}"
-        token = hashlib.sha256(raw.encode()).hexdigest()
+        token = generate_token(target, secret, action, timestamp)
 
         await clients[target].send_text(json.dumps({
             "type": "command",
@@ -84,9 +85,10 @@ async def send_command(target: str, action: str):
         }))
 
         print(f"[Cloud] 🚀 {action} → {target}")
-        print(f"        🕒 timestamp: {timestamp}")
-        print(f"        🔑 token: {token}")
+        print(f"        🕒 {timestamp}")
+        print(f"        🔑 {token}")
 
         return {"status": f"{action} sent to {target}"}
+
     else:
         return {"error": "Device not connected"}

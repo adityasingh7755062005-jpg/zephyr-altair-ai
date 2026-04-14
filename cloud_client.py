@@ -6,21 +6,14 @@ import time
 import hashlib
 
 DEVICE_ID = "160c02a2018e7132"
-
-# 🔐 SAME secret used during pairing (IMPORTANT)
 SECRET_KEY = "c63bd8f574f9634e3f50bda3fd5cce15"
 
-# ✅ Cloud server
 CLOUD_URL = "wss://zephyr-altair-ai-server.onrender.com/ws"
-
-# ✅ Local AI server
 LOCAL_SERVER = "http://127.0.0.1:5001"
 
-# ⏱️ Allowable delay (seconds)
 MAX_TIME_DIFF = 10
 
 
-# 🔐 TOKEN GENERATION (same logic as Android)
 def generate_token(action, timestamp):
     raw = f"{DEVICE_ID}{SECRET_KEY}{timestamp}{action}"
     return hashlib.sha256(raw.encode()).hexdigest()
@@ -33,7 +26,6 @@ async def connect():
 
             async with websockets.connect(CLOUD_URL) as websocket:
 
-                # REGISTER DEVICE
                 await websocket.send(json.dumps({
                     "type": "register",
                     "device_id": DEVICE_ID
@@ -56,22 +48,14 @@ async def connect():
                             print(f"   🕒 timestamp: {timestamp}")
                             print(f"   🔑 token: {token}")
 
-                            # =========================
-                            # 🔐 SECURITY CHECK
-                            # =========================
-
-                            # 1. Check timestamp exists
                             if not timestamp or not token:
                                 print("❌ Missing security data")
                                 continue
 
-                            # 2. Check time difference
-                            current_time = int(time.time())
-                            if abs(current_time - int(timestamp)) > MAX_TIME_DIFF:
-                                print("❌ Expired or replay attack")
+                            if abs(int(time.time()) - int(timestamp)) > MAX_TIME_DIFF:
+                                print("❌ Expired request")
                                 continue
 
-                            # 3. Validate token
                             expected_token = generate_token(action, timestamp)
 
                             if token != expected_token:
@@ -80,14 +64,18 @@ async def connect():
 
                             print("✅ Command verified")
 
-                            # =========================
-                            # EXECUTE COMMAND
-                            # =========================
-                            try:
-                                response = requests.post(f"{LOCAL_SERVER}/{action}")
-                                print(f"⚡ Local response: {response.status_code}")
-                            except Exception as e:
-                                print("❌ Local server error:", e)
+                            payload = {
+                                "device_id": DEVICE_ID,
+                                "timestamp": timestamp,
+                                "token": token
+                            }
+
+                            response = requests.post(
+                                f"{LOCAL_SERVER}/{action}",
+                                json=payload
+                            )
+
+                            print(f"⚡ Local response: {response.status_code}")
 
                     except websockets.ConnectionClosed:
                         print("⚠️ Connection lost. Reconnecting...")
