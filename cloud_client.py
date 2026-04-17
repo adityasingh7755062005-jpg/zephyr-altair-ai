@@ -9,7 +9,7 @@ DEVICE_ID = "160c02a2018e7132"
 SECRET_KEY = "c63bd8f574f9634e3f50bda3fd5cce15"
 
 CLOUD_URL = "wss://zephyr-altair-ai-server.onrender.com/ws"
-LOCAL_SERVER = "http://127.0.0.1:5001"
+LOCAL_SERVER = "http://127.0.0.1:5002"
 
 MAX_TIME_DIFF = 10
 
@@ -45,21 +45,16 @@ async def connect():
                             token = data.get("token")
 
                             print(f"📩 Command received: {action}")
-                            print(f"   🕒 timestamp: {timestamp}")
-                            print(f"   🔑 token: {token}")
 
                             if not timestamp or not token:
-                                print("❌ Missing security data")
                                 continue
 
                             if abs(int(time.time()) - int(timestamp)) > MAX_TIME_DIFF:
-                                print("❌ Expired request")
+                                print("❌ Expired")
                                 continue
 
-                            expected_token = generate_token(action, timestamp)
-
-                            if token != expected_token:
-                                print("❌ Invalid token (possible hacker)")
+                            if token != generate_token(action, timestamp):
+                                print("❌ Invalid token")
                                 continue
 
                             print("✅ Command verified")
@@ -78,11 +73,11 @@ async def connect():
                             print(f"⚡ Local response: {response.status_code}")
 
                     except websockets.ConnectionClosed:
-                        print("⚠️ Connection lost. Reconnecting...")
+                        print("⚠️ Reconnecting...")
                         break
 
         except Exception as e:
-            print("❌ Connection error:", e)
+            print("❌ Error:", e)
 
         time.sleep(3)
 

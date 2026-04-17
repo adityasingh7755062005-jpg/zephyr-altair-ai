@@ -82,7 +82,7 @@ async def upload_intruder(
 
         print(f"[Cloud] 📸 Intruder image saved: {filename}")
 
-        for _, ws in clients.items():
+        for ws in clients.values():
             try:
                 await ws.send_text(json.dumps({
                     "type": "intruder",
