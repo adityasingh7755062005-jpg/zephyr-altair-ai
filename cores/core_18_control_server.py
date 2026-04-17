@@ -8,7 +8,7 @@ import hashlib
 TRUSTED_DEVICE_PATH = "data/trusted_device.json"
 
 
-def start_control_server(core18, port=5002):
+def start_control_server(core18, port=5001):
 
     app = Flask("zephyr_control_server")
 
@@ -47,14 +47,21 @@ def start_control_server(core18, port=5002):
         action = req.path.replace("/", "")
 
         if not all([device_id, timestamp, token]):
+            print("❌ Missing security data")
             return False
 
         if abs(int(time.time()) - int(timestamp)) > 10:
+            print("❌ Expired request")
             return False
 
         expected = generate_token(device["device_id"], device["secret_key"], action, timestamp)
 
-        return token == expected
+        if token != expected:
+            print("❌ Invalid token")
+            return False
+
+        print("✅ Request verified")
+        return True
 
     @app.route("/", methods=["GET"])
     def home():
@@ -67,6 +74,7 @@ def start_control_server(core18, port=5002):
 
     @app.route("/lock", methods=["POST"])
     def lock():
+        print("🔒 LOCK endpoint hit")  # 🔥 DEBUG
         if not verify_request(request):
             return jsonify({"error": "unauthorized"}), 401
         core18.lock()
@@ -74,6 +82,7 @@ def start_control_server(core18, port=5002):
 
     @app.route("/unlock", methods=["POST"])
     def unlock():
+        print("🔓 UNLOCK endpoint hit")  # 🔥 DEBUG
         if not verify_request(request):
             return jsonify({"error": "unauthorized"}), 401
         core18.unlock()

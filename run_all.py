@@ -7,12 +7,14 @@ print("🚀 Starting Zephyr Full System...\n")
 
 processes = []
 
+
 def start_process(name, file):
     print(f"🔄 Starting {name}...")
     return subprocess.Popen(
         [sys.executable, file],
-        creationflags=subprocess.CREATE_NEW_CONSOLE  # ✅ important for Windows
+        creationflags=subprocess.CREATE_NEW_CONSOLE
     )
+
 
 try:
     cloud_client = start_process("Cloud Client", "cloud_client.py")
@@ -23,9 +25,13 @@ try:
 
     print("\n✅ All services started!\n")
 
-    # 🔥 Keep main thread alive
+    # 🔥 KEEP RUNNING FOREVER
     while True:
-        time.sleep(1)
+        # Check if any process died
+        for p in processes:
+            if p.poll() is not None:
+                print("❌ A process stopped unexpectedly")
+        time.sleep(2)
 
 except KeyboardInterrupt:
     print("\n🛑 Stopping all services...")

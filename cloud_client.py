@@ -9,7 +9,7 @@ DEVICE_ID = "160c02a2018e7132"
 SECRET_KEY = "c63bd8f574f9634e3f50bda3fd5cce15"
 
 CLOUD_URL = "wss://zephyr-altair-ai-server.onrender.com/ws"
-LOCAL_SERVER = "http://127.0.0.1:5002"
+LOCAL_SERVER = "http://127.0.0.1:5001"
 
 MAX_TIME_DIFF = 10
 
@@ -65,12 +65,15 @@ async def connect():
                                 "token": token
                             }
 
-                            response = requests.post(
-                                f"{LOCAL_SERVER}/{action}",
-                                json=payload
-                            )
-
-                            print(f"⚡ Local response: {response.status_code}")
+                            try:
+                                response = requests.post(
+                                    f"{LOCAL_SERVER}/{action}",
+                                    json=payload,
+                                    timeout=5   # 🔥 FIX
+                                )
+                                print(f"⚡ Local response: {response.status_code}")
+                            except requests.exceptions.RequestException as e:
+                                print("❌ Local server error:", e)
 
                     except websockets.ConnectionClosed:
                         print("⚠️ Reconnecting...")
