@@ -9,7 +9,6 @@ TRUSTED_DEVICE_PATH = "data/trusted_device.json"
 
 
 def start_control_server(core18, port=5001):
-
     app = Flask("zephyr_control_server")
 
     def load_device():
@@ -19,7 +18,7 @@ def start_control_server(core18, port=5001):
             with open(TRUSTED_DEVICE_PATH, "r") as f:
                 return json.load(f)
         except Exception as e:
-            print("[Control] Load error:", e)
+            print("[Control] Load device error:", e)
             return None
 
     def save_device(data):
@@ -33,6 +32,7 @@ def start_control_server(core18, port=5001):
 
     def verify_request(req):
         device = load_device()
+
         if not device:
             return True
 
@@ -57,7 +57,7 @@ def start_control_server(core18, port=5001):
         expected = generate_token(device["device_id"], device["secret_key"], action, timestamp)
 
         if token != expected:
-            print("❌ Invalid token")
+            print("❌ Invalid token (possible hacker)")
             return False
 
         print("✅ Request verified")
@@ -65,29 +65,59 @@ def start_control_server(core18, port=5001):
 
     @app.route("/", methods=["GET"])
     def home():
-        return jsonify({"status": "Control Server Running"})
+        return jsonify({"status": "Local Control Server Running 🚀"})
+
+    @app.route("/pair", methods=["POST"])
+    def pair():
+        data = request.get_json(force=True)
+
+        device_id = data.get("device_id")
+        device_name = data.get("device_name", "Unknown Device")
+
+        secret_key = secrets.token_hex(16)
+
+        save_device({
+            "device_name": device_name,
+            "device_id": device_id,
+            "secret_key": secret_key
+        })
+
+        print(f"[Control] 🔗 Paired with {device_name}")
+
+        return jsonify({
+            "status": "paired",
+            "secret_key": secret_key
+        })
 
     @app.route("/test", methods=["POST"])
     def test():
-        print("🔥 TEST RECEIVED")
-        return jsonify({"status": "ok"})
+        print("🔥 TEST COMMAND RECEIVED FROM CLOUD")
+        return jsonify({"status": "test success"})
 
     @app.route("/lock", methods=["POST"])
     def lock():
-        print("🔒 LOCK endpoint hit")  # 🔥 DEBUG
+        print("[Control] 🔒 Lock command received")
+
         if not verify_request(request):
             return jsonify({"error": "unauthorized"}), 401
+
         core18.lock()
         return jsonify({"status": "locked"})
 
     @app.route("/unlock", methods=["POST"])
     def unlock():
-        print("🔓 UNLOCK endpoint hit")  # 🔥 DEBUG
+        print("[Control] 🔓 Unlock command received")
+
         if not verify_request(request):
             return jsonify({"error": "unauthorized"}), 401
+
         core18.unlock()
         return jsonify({"status": "unlocked"})
 
-    print(f"[Control] 🚀 Running on port {port}")
+    @app.route("/status", methods=["GET"])
+    def status():
+        return jsonify({"state": core18.security_state.value})
+
+    print(f"[Control] 🚀 Server running on port {port}")
 
     app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)

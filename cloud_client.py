@@ -45,16 +45,21 @@ async def connect():
                             token = data.get("token")
 
                             print(f"📩 Command received: {action}")
+                            print(f"   🕒 timestamp: {timestamp}")
+                            print(f"   🔑 token: {token}")
 
                             if not timestamp or not token:
+                                print("❌ Missing security data")
                                 continue
 
                             if abs(int(time.time()) - int(timestamp)) > MAX_TIME_DIFF:
-                                print("❌ Expired")
+                                print("❌ Expired request")
                                 continue
 
-                            if token != generate_token(action, timestamp):
-                                print("❌ Invalid token")
+                            expected_token = generate_token(action, timestamp)
+
+                            if token != expected_token:
+                                print("❌ Invalid token (possible hacker)")
                                 continue
 
                             print("✅ Command verified")
@@ -65,22 +70,19 @@ async def connect():
                                 "token": token
                             }
 
-                            try:
-                                response = requests.post(
-                                    f"{LOCAL_SERVER}/{action}",
-                                    json=payload,
-                                    timeout=5   # 🔥 FIX
-                                )
-                                print(f"⚡ Local response: {response.status_code}")
-                            except requests.exceptions.RequestException as e:
-                                print("❌ Local server error:", e)
+                            response = requests.post(
+                                f"{LOCAL_SERVER}/{action}",
+                                json=payload
+                            )
+
+                            print(f"⚡ Local response: {response.status_code}")
 
                     except websockets.ConnectionClosed:
-                        print("⚠️ Reconnecting...")
+                        print("⚠️ Connection lost. Reconnecting...")
                         break
 
         except Exception as e:
-            print("❌ Error:", e)
+            print("❌ Connection error:", e)
 
         time.sleep(3)
 
