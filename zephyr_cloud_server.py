@@ -1,7 +1,10 @@
 import json
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File
+from fastapi.staticfiles import StaticFiles
 import time
 import hashlib
+import os
+import shutil
 
 app = FastAPI()
 
@@ -11,6 +14,13 @@ clients = {}
 DEVICE_SECRETS = {
     "160c02a2018e7132": "c63bd8f574f9634e3f50bda3fd5cce15"
 }
+
+# 📁 Intruder folder (Render compatible)
+UPLOAD_DIR = "intruders"
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+# 🔥 Serve images
+app.mount("/intruders", StaticFiles(directory=UPLOAD_DIR), name="intruders")
 
 
 def generate_token(device_id, secret_key, action, timestamp):
@@ -92,3 +102,45 @@ async def send_command(target: str, action: str):
 
     else:
         return {"error": "Device not connected"}
+
+
+# =========================================================
+# 🔥 ADDED: INTRUDER UPLOAD (NO CHANGE TO EXISTING FLOW)
+# =========================================================
+
+@app.post("/upload_intruder")
+async def upload_intruder(
+    file: UploadFile = File(...),
+    device_id: str = "",
+    activity: str = "Intruder detected"
+):
+    try:
+        timestamp = int(time.time())
+        filename = f"{device_id}_{timestamp}.jpg"
+        file_path = os.path.join(UPLOAD_DIR, filename)
+
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+
+        image_url = f"https://zephyr-altair-ai-server.onrender.com/intruders/{filename}"
+
+        print(f"[Cloud] 📸 Saved: {filename}")
+
+        # 🔁 Send to all connected clients (like your app)
+        for _, ws in clients.items():
+            try:
+                await ws.send_text(json.dumps({
+                    "type": "intruder",
+                    "image_url": image_url,
+                    "time": time.strftime("%H:%M:%S"),
+                    "date": time.strftime("%Y-%m-%d"),
+                    "activity": activity
+                }))
+            except:
+                pass
+
+        return {"status": "uploaded", "image_url": image_url}
+
+    except Exception as e:
+        print("❌ Upload error:", e)
+        return {"error": str(e)}
