@@ -11,7 +11,8 @@ SECRET_KEY = "c63bd8f574f9634e3f50bda3fd5cce15"
 CLOUD_URL = "wss://zephyr-altair-ai-server.onrender.com/ws"
 LOCAL_SERVER = "http://127.0.0.1:5001"
 
-MAX_TIME_DIFF = 10
+# 🔥 FIX: Increased tolerance (was 10)
+MAX_TIME_DIFF = 300   # 5 minutes
 
 
 def generate_token(action, timestamp):
@@ -52,7 +53,13 @@ async def connect():
                                 print("❌ Missing security data")
                                 continue
 
-                            if abs(int(time.time()) - int(timestamp)) > MAX_TIME_DIFF:
+                            try:
+                                timestamp = int(timestamp)
+                            except:
+                                print("❌ Invalid timestamp format")
+                                continue
+
+                            if abs(int(time.time()) - timestamp) > MAX_TIME_DIFF:
                                 print("❌ Expired request")
                                 continue
 

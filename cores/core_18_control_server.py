@@ -7,6 +7,9 @@ import hashlib
 
 TRUSTED_DEVICE_PATH = "data/trusted_device.json"
 
+# 🔥 FIX: Increased tolerance (was 10)
+MAX_TIME_DIFF = 300  # 5 minutes
+
 
 def start_control_server(core18, port=5001):
     app = Flask("zephyr_control_server")
@@ -50,7 +53,13 @@ def start_control_server(core18, port=5001):
             print("❌ Missing security data")
             return False
 
-        if abs(int(time.time()) - int(timestamp)) > 10:
+        try:
+            timestamp = int(timestamp)
+        except:
+            print("❌ Invalid timestamp")
+            return False
+
+        if abs(int(time.time()) - timestamp) > MAX_TIME_DIFF:
             print("❌ Expired request")
             return False
 
