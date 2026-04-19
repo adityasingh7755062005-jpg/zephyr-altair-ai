@@ -22,6 +22,11 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 # 🔥 Serve images
 app.mount("/intruders", StaticFiles(directory=UPLOAD_DIR), name="intruders")
 
+# 🆕 ADD: Intruder logs storage (NO FLOW CHANGE)
+intruder_logs = []
+
+BASE_URL = "https://zephyr-altair-ai-server.onrender.com"
+
 
 def generate_token(device_id, secret_key, action, timestamp):
     raw = f"{device_id}{secret_key}{timestamp}{action}"
@@ -105,7 +110,7 @@ async def send_command(target: str, action: str):
 
 
 # =========================================================
-# 🔥 ADDED: INTRUDER UPLOAD (NO CHANGE TO EXISTING FLOW)
+# 🔥 INTRUDER UPLOAD (FLOW SAME + STORAGE ADDED)
 # =========================================================
 
 @app.post("/upload_intruder")
@@ -122,11 +127,21 @@ async def upload_intruder(
         with open(file_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
 
-        image_url = f"https://zephyr-altair-ai-server.onrender.com/intruders/{filename}"
+        image_url = f"{BASE_URL}/intruders/{filename}"
 
         print(f"[Cloud] 📸 Saved: {filename}")
 
-        # 🔁 Send to all connected clients (like your app)
+        # 🆕 ADD: Save to logs (for phone fetch)
+        intruder_logs.append({
+            "device_id": device_id,
+            "image_url": image_url,
+            "activity": activity,
+            "timestamp": timestamp,
+            "time": time.strftime("%H:%M:%S"),
+            "date": time.strftime("%Y-%m-%d")
+        })
+
+        # 🔁 EXISTING FLOW (UNCHANGED)
         for _, ws in clients.items():
             try:
                 await ws.send_text(json.dumps({
@@ -144,3 +159,12 @@ async def upload_intruder(
     except Exception as e:
         print("❌ Upload error:", e)
         return {"error": str(e)}
+
+
+# =========================================================
+# 🆕 NEW API (FOR PHONE FETCH — WHATSAPP STYLE)
+# =========================================================
+
+@app.get("/get_intruder_logs")
+def get_intruder_logs():
+    return intruder_logs
