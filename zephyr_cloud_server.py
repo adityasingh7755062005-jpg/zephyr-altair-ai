@@ -5,24 +5,21 @@ import time
 import hashlib
 import os
 import shutil
+import asyncio
 
 app = FastAPI()
 
 clients = {}
 
-# 🔐 SAME SECRET MAP (for testing manual endpoint)
 DEVICE_SECRETS = {
     "160c02a2018e7132": "c63bd8f574f9634e3f50bda3fd5cce15"
 }
 
-# 📁 Intruder folder (Render compatible)
 UPLOAD_DIR = "intruders"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-# 🔥 Serve images
 app.mount("/intruders", StaticFiles(directory=UPLOAD_DIR), name="intruders")
 
-# 🆕 ADD: Intruder logs storage (NO FLOW CHANGE)
 intruder_logs = []
 
 BASE_URL = "https://zephyr-altair-ai-server.onrender.com"
@@ -55,15 +52,19 @@ async def websocket_endpoint(websocket: WebSocket):
                 timestamp = data.get("timestamp")
 
                 if target in clients:
-                    await clients[target].send_text(json.dumps({
-                        "type": "command",
-                        "action": action,
-                        "token": token,
-                        "timestamp": timestamp
-                    }))
-
-                    print(f"[Cloud] 📤 {action} → {target}")
-
+                    for i in range(3):
+                        try:
+                            await clients[target].send_text(json.dumps({
+                                "type": "command",
+                                "action": action,
+                                "token": token,
+                                "timestamp": timestamp
+                            }))
+                            print(f"[Cloud] 📤 {action} → {target} (try {i+1})")
+                            break
+                        except Exception as e:
+                            print(f"[Cloud] retry {i+1} failed:", e)
+                            await asyncio.sleep(1)
                 else:
                     print(f"[Cloud] ❌ Target {target} not found")
 
@@ -92,26 +93,25 @@ async def send_command(target: str, action: str):
         timestamp = int(time.time())
         token = generate_token(target, secret, action, timestamp)
 
-        await clients[target].send_text(json.dumps({
-            "type": "command",
-            "action": action,
-            "token": token,
-            "timestamp": timestamp
-        }))
-
-        print(f"[Cloud] 🚀 {action} → {target}")
-        print(f"        🕒 {timestamp}")
-        print(f"        🔑 {token}")
+        for i in range(3):
+            try:
+                await clients[target].send_text(json.dumps({
+                    "type": "command",
+                    "action": action,
+                    "token": token,
+                    "timestamp": timestamp
+                }))
+                print(f"[Cloud] 🚀 {action} → {target} (try {i+1})")
+                break
+            except Exception as e:
+                print(f"[Cloud] retry {i+1} failed:", e)
+                await asyncio.sleep(1)
 
         return {"status": f"{action} sent to {target}"}
 
     else:
         return {"error": "Device not connected"}
 
-
-# =========================================================
-# 🔥 INTRUDER UPLOAD (FLOW SAME + STORAGE ADDED)
-# =========================================================
 
 @app.post("/upload_intruder")
 async def upload_intruder(
@@ -131,7 +131,6 @@ async def upload_intruder(
 
         print(f"[Cloud] 📸 Saved: {filename}")
 
-        # 🆕 ADD: Save to logs (for phone fetch)
         intruder_logs.append({
             "device_id": device_id,
             "image_url": image_url,
@@ -141,7 +140,6 @@ async def upload_intruder(
             "date": time.strftime("%Y-%m-%d")
         })
 
-        # 🔁 EXISTING FLOW (UNCHANGED)
         for _, ws in clients.items():
             try:
                 await ws.send_text(json.dumps({
@@ -160,10 +158,6 @@ async def upload_intruder(
         print("❌ Upload error:", e)
         return {"error": str(e)}
 
-
-# =========================================================
-# 🆕 NEW API (FOR PHONE FETCH — WHATSAPP STYLE)
-# =========================================================
 
 @app.get("/get_intruder_logs")
 def get_intruder_logs():

@@ -1,13 +1,11 @@
-# cores/core_18_intruder_detector.py
-
 import cv2
 import os
 from datetime import datetime
 from pynput import keyboard, mouse
 import requests
 import threading
+import time
 
-# 🔥 CLOUD CONFIG
 CLOUD_UPLOAD_URL = "https://zephyr-altair-ai-server.onrender.com/upload_intruder"
 DEVICE_ID = "160c02a2018e7132"
 
@@ -17,6 +15,7 @@ class IntruderDetector:
     def __init__(self):
 
         self.freeze_active = False
+        self.last_upload_time = 0
 
         os.makedirs("intruders", exist_ok=True)
 
@@ -37,6 +36,13 @@ class IntruderDetector:
 
         if not self.freeze_active:
             return
+
+        now = time.time()
+
+        if now - self.last_upload_time < 5:
+            return
+
+        self.last_upload_time = now
 
         print("[Core 18] Intruder activity detected")
 
