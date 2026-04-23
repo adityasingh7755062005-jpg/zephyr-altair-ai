@@ -17,7 +17,7 @@ class IntruderDetector:
         self.freeze_active = False
         self.last_upload_time = 0
 
-        # 🔥 NEW: prevent parallel camera usage
+        # 🔥 prevent camera conflicts
         self.capture_lock = threading.Lock()
 
         os.makedirs("intruders", exist_ok=True)
@@ -42,7 +42,6 @@ class IntruderDetector:
 
         now = time.time()
 
-        # 🔥 COOLDOWN (prevents spam + camera crash)
         if now - self.last_upload_time < 5:
             return
 
@@ -50,7 +49,7 @@ class IntruderDetector:
 
         print("[Core 18] Intruder activity detected")
 
-        # 🔥 THREAD SAFE CALL
+        # 🔥 run safely in thread
         threading.Thread(
             target=self.capture_photo,
             daemon=True
@@ -58,7 +57,6 @@ class IntruderDetector:
 
     def capture_photo(self):
 
-        # 🔥 PREVENT MULTIPLE CAMERA ACCESS
         if not self.capture_lock.acquire(blocking=False):
             return
 
@@ -97,12 +95,11 @@ class IntruderDetector:
         finally:
             if cam:
                 cam.release()
-
             self.capture_lock.release()
 
     def upload_intruder_image(self, file_path):
 
-        # 🔥 RETRY SYSTEM (guaranteed delivery)
+        # 🔥 retry (fix missing uploads)
         for attempt in range(3):
             try:
 
@@ -127,12 +124,12 @@ class IntruderDetector:
                     print(f"[Core 18] Upload response: {response.status_code}")
 
                     if response.status_code == 200:
-                        return  # ✅ SUCCESS
+                        return
 
             except Exception as e:
                 print(f"[Core 18] Upload failed (attempt {attempt+1}):", e)
 
-            time.sleep(2)  # 🔁 wait before retry
+            time.sleep(2)
 
         print("[Core 18] ❌ Upload permanently failed")
 

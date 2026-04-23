@@ -21,32 +21,17 @@ class Core18:
 
         self.login_watcher = LoginWatcher(self._on_desktop_ready)
 
-        # ==========================
-        # SECURITY SYSTEMS
-        # ==========================
         self.freeze_overlay = FreezeOverlay()
         self.intruder_detector = IntruderDetector()
 
-        # ==========================
-        # SERVERS
-        # ==========================
         self.start_control_listener()
         start_discovery_server()
 
-        # ==========================
-        # PAIRING CHECK
-        # ==========================
         self.check_trusted_device()
 
-        # ==========================
-        # CLOUD
-        # ==========================
         self.cloud_client = None
         print("[Core 18] Cloud disabled (local testing mode)")
 
-        # ==========================
-        # WATCHERS
-        # ==========================
         self._start_session_watcher()
         self._start_login_watcher()
 
@@ -63,9 +48,9 @@ class Core18:
     def _on_windows_unlock(self):
         print("[Core 18] Windows UNLOCK detected")
 
-        # 🔥 FIX: ensure cleanup always happens
-        self.freeze_overlay.hide()
-        self.intruder_detector.disable()
+        # 🔥 FIX: DO NOTHING HERE
+        # overlay should NOT hide automatically
+        pass
 
     def _start_session_watcher(self):
         watcher = SessionWatcher(
