@@ -71,9 +71,11 @@ class FreezeOverlay:
                     overlay.lift()
                     overlay.attributes("-topmost", True)
                     overlay.focus_force()
+                    self.active = True
 
                 elif cmd == "HIDE":
                     overlay.withdraw()
+                    self.active = False
 
             except queue.Empty:
                 pass
