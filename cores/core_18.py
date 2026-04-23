@@ -39,7 +39,7 @@ class Core18:
         self.check_trusted_device()
 
         # ==========================
-        # ❌ CLOUD DISABLED (LOCAL TEST MODE)
+        # CLOUD
         # ==========================
         self.cloud_client = None
         print("[Core 18] Cloud disabled (local testing mode)")
@@ -52,10 +52,6 @@ class Core18:
 
         self.login_watcher.arm()
 
-    # ==================================================
-    # WINDOWS SESSION
-    # ==================================================
-
     def _on_windows_lock(self):
         print("[Core 18] Windows LOCK detected")
 
@@ -66,6 +62,10 @@ class Core18:
 
     def _on_windows_unlock(self):
         print("[Core 18] Windows UNLOCK detected")
+
+        # 🔥 FIX: ensure cleanup always happens
+        self.freeze_overlay.hide()
+        self.intruder_detector.disable()
 
     def _start_session_watcher(self):
         watcher = SessionWatcher(
@@ -78,10 +78,6 @@ class Core18:
             daemon=True
         ).start()
 
-    # ==================================================
-    # DESKTOP
-    # ==================================================
-
     def _on_desktop_ready(self):
         print("[Core 18] Desktop detected")
 
@@ -90,10 +86,6 @@ class Core18:
             target=self.login_watcher.start,
             daemon=True
         ).start()
-
-    # ==================================================
-    # CONTROL SERVER
-    # ==================================================
 
     def start_control_listener(self):
         threading.Thread(
@@ -111,10 +103,6 @@ class Core18:
         else:
             print("[Core 18] No trusted device found")
             print("[Core 18] Waiting for manual pairing...")
-
-    # ==================================================
-    # LOCAL COMMANDS (PHONE VIA LOCAL SERVER)
-    # ==================================================
 
     def lock(self):
         print("[Core 18] Lock requested (LOCAL)")
