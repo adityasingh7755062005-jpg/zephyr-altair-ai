@@ -4,3 +4,4 @@ intruders/
 memory/
 __pycache__/
 main_app.py
+firebase_key.json
