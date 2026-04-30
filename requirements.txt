@@ -3,3 +3,4 @@ fastapi
 uvicorn
 requests
 python-multipart
+firebase-admin

@@ -7,7 +7,17 @@ import os
 import shutil
 import asyncio
 
+# 🔥 Firebase imports
+import firebase_admin
+from firebase_admin import credentials, messaging
+
 app = FastAPI()
+
+# 🔥 INIT FIREBASE (ONLY ONCE)
+if not firebase_admin._apps:
+    cred = credentials.Certificate("firebase_key.json")
+    firebase_admin.initialize_app(cred)
+    print("✅ Firebase initialized successfully")
 
 clients = {}
 
@@ -28,6 +38,25 @@ BASE_URL = "https://zephyr-altair-ai-server.onrender.com"
 def generate_token(device_id, secret_key, action, timestamp):
     raw = f"{device_id}{secret_key}{timestamp}{action}"
     return hashlib.sha256(raw.encode()).hexdigest()
+
+
+# 🔥 FCM SEND FUNCTION
+def send_fcm_notification(token, title, body, data=None):
+    try:
+        message = messaging.Message(
+            notification=messaging.Notification(
+                title=title,
+                body=body
+            ),
+            data=data or {},
+            token=token
+        )
+
+        response = messaging.send(message)
+        print("✅ FCM sent:", response)
+
+    except Exception as e:
+        print("❌ FCM error:", e)
 
 
 @app.websocket("/ws")
@@ -117,7 +146,8 @@ async def send_command(target: str, action: str):
 async def upload_intruder(
     file: UploadFile = File(...),
     device_id: str = "",
-    activity: str = "Intruder detected"
+    activity: str = "Intruder detected",
+    fcm_token: str = ""   # 🔥 NEW
 ):
     try:
         timestamp = int(time.time())
@@ -140,6 +170,21 @@ async def upload_intruder(
             "date": time.strftime("%Y-%m-%d")
         })
 
+        # 🔥 SEND FCM NOTIFICATION
+        if fcm_token:
+            send_fcm_notification(
+                token=fcm_token,
+                title="🚨 Intruder Detected!",
+                body=activity,
+                data={
+                    "type": "intruder",
+                    "image_url": image_url,
+                    "time": time.strftime("%H:%M:%S"),
+                    "date": time.strftime("%Y-%m-%d")
+                }
+            )
+
+        # Existing WebSocket broadcast
         for _, ws in clients.items():
             try:
                 await ws.send_text(json.dumps({
