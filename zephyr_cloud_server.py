@@ -1,25 +1,35 @@
 import json
+import os
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File
 from fastapi.staticfiles import StaticFiles
 import time
 import hashlib
-import os
 import shutil
 import asyncio
 
-# 🔥 Firebase imports
+# 🔥 Firebase
 import firebase_admin
 from firebase_admin import credentials, messaging
 
 app = FastAPI()
 
-# 🔥 INIT FIREBASE (ONLY ONCE)
+# ✅ FIX: LOAD FIREBASE FROM ENV (RENDER SAFE)
 if not firebase_admin._apps:
-    cred = credentials.Certificate("firebase_key.json")
+    firebase_json = os.getenv("FIREBASE_KEY")
+
+    if not firebase_json:
+        raise Exception("❌ FIREBASE_KEY not set in environment")
+
+    cred_dict = json.loads(firebase_json)
+    cred = credentials.Certificate(cred_dict)
     firebase_admin.initialize_app(cred)
-    print("✅ Firebase initialized successfully")
+
+    print("✅ Firebase initialized (Render safe)")
 
 clients = {}
+
+# 🔥 STORE FCM TOKENS
+fcm_tokens = {}
 
 DEVICE_SECRETS = {
     "160c02a2018e7132": "c63bd8f574f9634e3f50bda3fd5cce15"
@@ -40,7 +50,7 @@ def generate_token(device_id, secret_key, action, timestamp):
     return hashlib.sha256(raw.encode()).hexdigest()
 
 
-# 🔥 FCM SEND FUNCTION
+# 🔥 SEND FCM
 def send_fcm_notification(token, title, body, data=None):
     try:
         message = messaging.Message(
@@ -57,6 +67,21 @@ def send_fcm_notification(token, title, body, data=None):
 
     except Exception as e:
         print("❌ FCM error:", e)
+
+
+# 🔥 SAVE TOKEN FROM APP
+@app.post("/register_fcm")
+async def register_fcm(data: dict):
+    device_id = data.get("device_id")
+    token = data.get("fcm_token")
+
+    if not device_id or not token:
+        return {"error": "Missing data"}
+
+    fcm_tokens[device_id] = token
+    print(f"✅ FCM saved for {device_id}")
+
+    return {"status": "ok"}
 
 
 @app.websocket("/ws")
@@ -77,25 +102,14 @@ async def websocket_endpoint(websocket: WebSocket):
             elif data.get("type") == "command":
                 target = data.get("target")
                 action = data.get("action")
-                token = data.get("token")
-                timestamp = data.get("timestamp")
 
                 if target in clients:
-                    for i in range(3):
-                        try:
-                            await clients[target].send_text(json.dumps({
-                                "type": "command",
-                                "action": action,
-                                "token": token,
-                                "timestamp": timestamp
-                            }))
-                            print(f"[Cloud] 📤 {action} → {target} (try {i+1})")
-                            break
-                        except Exception as e:
-                            print(f"[Cloud] retry {i+1} failed:", e)
-                            await asyncio.sleep(1)
+                    await clients[target].send_text(json.dumps({
+                        "type": "command",
+                        "action": action
+                    }))
                 else:
-                    print(f"[Cloud] ❌ Target {target} not found")
+                    print(f"[Cloud] ❌ Target not found")
 
     except WebSocketDisconnect:
         print(f"[Cloud] ⚠️ {device_id} disconnected")
@@ -110,44 +124,11 @@ def home():
     return {"status": "Zephyr Cloud Running 🚀"}
 
 
-@app.get("/send/{target}/{action}")
-async def send_command(target: str, action: str):
-    if target in clients:
-
-        secret = DEVICE_SECRETS.get(target)
-
-        if not secret:
-            return {"error": "Unknown device"}
-
-        timestamp = int(time.time())
-        token = generate_token(target, secret, action, timestamp)
-
-        for i in range(3):
-            try:
-                await clients[target].send_text(json.dumps({
-                    "type": "command",
-                    "action": action,
-                    "token": token,
-                    "timestamp": timestamp
-                }))
-                print(f"[Cloud] 🚀 {action} → {target} (try {i+1})")
-                break
-            except Exception as e:
-                print(f"[Cloud] retry {i+1} failed:", e)
-                await asyncio.sleep(1)
-
-        return {"status": f"{action} sent to {target}"}
-
-    else:
-        return {"error": "Device not connected"}
-
-
 @app.post("/upload_intruder")
 async def upload_intruder(
     file: UploadFile = File(...),
     device_id: str = "",
-    activity: str = "Intruder detected",
-    fcm_token: str = ""   # 🔥 NEW
+    activity: str = "Intruder detected"
 ):
     try:
         timestamp = int(time.time())
@@ -170,32 +151,21 @@ async def upload_intruder(
             "date": time.strftime("%Y-%m-%d")
         })
 
-        # 🔥 SEND FCM NOTIFICATION
-        if fcm_token:
+        # 🔥 SEND FCM USING STORED TOKEN
+        token = fcm_tokens.get(device_id)
+        if token:
             send_fcm_notification(
-                token=fcm_token,
-                title="🚨 Intruder Detected!",
-                body=activity,
-                data={
-                    "type": "intruder",
-                    "image_url": image_url,
-                    "time": time.strftime("%H:%M:%S"),
-                    "date": time.strftime("%Y-%m-%d")
-                }
-            )
-
-        # Existing WebSocket broadcast
-        for _, ws in clients.items():
-            try:
-                await ws.send_text(json.dumps({
+                token,
+                "🚨 Intruder Detected!",
+                activity,
+                {
                     "type": "intruder",
                     "image_url": image_url,
                     "time": time.strftime("%H:%M:%S"),
                     "date": time.strftime("%Y-%m-%d"),
                     "activity": activity
-                }))
-            except:
-                pass
+                }
+            )
 
         return {"status": "uploaded", "image_url": image_url}
 
