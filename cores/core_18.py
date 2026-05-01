@@ -1,5 +1,5 @@
 # ==============================
-# FILE 4: core_18.py
+# FILE 4: core_18.py (FINAL CLEAN)
 # ==============================
 
 from cores.core_18_security_state import SecurityState
@@ -11,8 +11,13 @@ from cores.core_18_discovery_server import start_discovery_server
 from cores.core_18_freeze_overlay import FreezeOverlay
 from cores.core_18_intruder_detector import IntruderDetector
 
+# 🔥 NETWORK LAYER
+from network.connection_manager import ConnectionManager
+from network.cloud_client import CloudClient
+
 import threading
 import ctypes
+import asyncio
 
 
 class Core18:
@@ -28,6 +33,9 @@ class Core18:
         self.freeze_overlay = FreezeOverlay()
         self.intruder_detector = IntruderDetector()
 
+        # ==============================
+        # 🔥 LOCAL SYSTEMS
+        # ==============================
         self.start_control_listener()
         start_discovery_server()
 
@@ -38,6 +46,28 @@ class Core18:
 
         self.login_watcher.arm()
 
+        # ==============================
+        # 🔥 CONNECTION MANAGER (MAIN)
+        # ==============================
+        self.connection = ConnectionManager(self)
+        print("[Core 18] Connection Manager started")
+
+        # ==============================
+        # 🔥 OPTIONAL CLOUD LISTENER
+        # (pure cloud, no local HTTP)
+        # ==============================
+        self.cloud_client = CloudClient(self)
+
+        threading.Thread(
+            target=lambda: asyncio.run(self.cloud_client.connect()),
+            daemon=True
+        ).start()
+
+        print("[Core 18] Cloud Client started")
+
+    # ==============================
+    # 🔒 WINDOWS EVENTS
+    # ==============================
     def _on_windows_lock(self):
         self.freeze_overlay.show()
         self.intruder_detector.enable()
@@ -45,6 +75,9 @@ class Core18:
     def _on_windows_unlock(self):
         pass
 
+    # ==============================
+    # WATCHERS
+    # ==============================
     def _start_session_watcher(self):
         watcher = SessionWatcher(
             on_lock=self._on_windows_lock,
@@ -58,6 +91,9 @@ class Core18:
             daemon=True
         ).start()
 
+    # ==============================
+    # LOCAL CONTROL SERVER
+    # ==============================
     def start_control_listener(self):
         threading.Thread(
             target=start_control_server,
@@ -70,7 +106,12 @@ class Core18:
         if device:
             self.security_state = SecurityState.UNLOCKED
 
+    # ==============================
+    # 🔐 CORE ACTIONS
+    # ==============================
     def lock(self):
+        print("[Core 18] 🔒 Lock triggered")
+
         self.freeze_overlay.show()
         self.intruder_detector.enable()
 
@@ -80,6 +121,8 @@ class Core18:
             print("[ERROR]", e)
 
     def unlock(self):
+        print("[Core 18] 🔓 Unlock triggered")
+
         self.security_state = SecurityState.UNLOCKED
         self.freeze_overlay.hide()
         self.intruder_detector.disable()
