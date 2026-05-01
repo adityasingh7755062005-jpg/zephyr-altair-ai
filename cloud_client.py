@@ -14,8 +14,9 @@ LOCAL_SERVER = "http://127.0.0.1:5001"
 MAX_TIME_DIFF = 300  # 5 minutes
 
 
-def generate_token(action, timestamp):
-    raw = f"{DEVICE_ID}{SECRET_KEY}{timestamp}{action}"
+# 🔥 MATCH SERVER TOKEN LOGIC EXACTLY
+def generate_token(device_id, secret_key, action, timestamp):
+    raw = f"{device_id}{secret_key}{timestamp}{action}"
     return hashlib.sha256(raw.encode()).hexdigest()
 
 
@@ -26,8 +27,8 @@ async def connect():
 
             async with websockets.connect(
                 CLOUD_URL,
-                ping_interval=20,
-                ping_timeout=20
+                ping_interval=30,   # 🔥 increased (fix timeout)
+                ping_timeout=30
             ) as websocket:
 
                 await websocket.send(json.dumps({
@@ -52,7 +53,8 @@ async def connect():
                             print(f"   🕒 timestamp: {timestamp}")
                             print(f"   🔑 token: {token}")
 
-                            if not timestamp or not token:
+                            # 🔥 HARD CHECK
+                            if not action or not timestamp or not token:
                                 print("❌ Missing security data")
                                 continue
 
@@ -62,11 +64,18 @@ async def connect():
                                 print("❌ Invalid timestamp format")
                                 continue
 
+                            # 🔥 TIME VALIDATION
                             if abs(int(time.time()) - timestamp) > MAX_TIME_DIFF:
                                 print("❌ Expired request")
                                 continue
 
-                            expected_token = generate_token(action, timestamp)
+                            # 🔥 TOKEN VALIDATION (FIXED)
+                            expected_token = generate_token(
+                                DEVICE_ID,
+                                SECRET_KEY,
+                                action,
+                                timestamp
+                            )
 
                             if token != expected_token:
                                 print("❌ Invalid token (possible hacker)")
