@@ -1,10 +1,14 @@
+# ==============================
+# FILE 18: core_18_intruder_detector.py
+# ==============================
+
 import cv2
 import os
+import time
+import threading
+import requests
 from datetime import datetime
 from pynput import keyboard, mouse
-import requests
-import threading
-import time
 
 CLOUD_UPLOAD_URL = "https://zephyr-altair-ai-server.onrender.com/upload_intruder"
 DEVICE_ID = "160c02a2018e7132"
@@ -13,125 +17,78 @@ DEVICE_ID = "160c02a2018e7132"
 class IntruderDetector:
 
     def __init__(self):
-
         self.freeze_active = False
-        self.last_upload_time = 0
-
-        # 🔥 prevent camera conflicts
-        self.capture_lock = threading.Lock()
+        self.last_upload = 0
+        self.lock = threading.Lock()
 
         os.makedirs("intruders", exist_ok=True)
 
-        self.keyboard_listener = keyboard.Listener(
-            on_press=self._on_activity
-        )
-
-        self.mouse_listener = mouse.Listener(
+        keyboard.Listener(on_press=self._on_activity).start()
+        mouse.Listener(
             on_move=self._on_activity,
-            on_click=self._on_activity,
-            on_scroll=self._on_activity
-        )
-
-        self.keyboard_listener.start()
-        self.mouse_listener.start()
+            on_click=self._on_activity
+        ).start()
 
     def _on_activity(self, *args):
 
         if not self.freeze_active:
             return
 
-        now = time.time()
-
-        if now - self.last_upload_time < 5:
+        if time.time() - self.last_upload < 5:
             return
 
-        self.last_upload_time = now
+        self.last_upload = time.time()
 
-        print("[Core 18] Intruder activity detected")
+        threading.Thread(target=self.capture, daemon=True).start()
 
-        # 🔥 run safely in thread
-        threading.Thread(
-            target=self.capture_photo,
-            daemon=True
-        ).start()
+    def capture(self):
 
-    def capture_photo(self):
-
-        if not self.capture_lock.acquire(blocking=False):
+        if not self.lock.acquire(blocking=False):
             return
-
-        cam = None
 
         try:
             cam = cv2.VideoCapture(0)
 
             if not cam.isOpened():
-                print("[Core 18] Camera not available")
                 return
 
             ret, frame = cam.read()
 
             if ret:
-
-                timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-                filename = f"intruders/intruder_{timestamp}.jpg"
-
-                cv2.imwrite(filename, frame)
-
-                print(f"[Core 18] Intruder photo saved: {filename}")
+                file = f"intruders/{datetime.now().strftime('%H%M%S')}.jpg"
+                cv2.imwrite(file, frame)
 
                 threading.Thread(
-                    target=self.upload_intruder_image,
-                    args=(filename,),
+                    target=self.upload,
+                    args=(file,),
                     daemon=True
                 ).start()
 
-            else:
-                print("[Core 18] Camera read failed")
-
-        except Exception as e:
-            print("[Core 18] Intruder capture failed:", e)
+            cam.release()
 
         finally:
-            if cam:
-                cam.release()
-            self.capture_lock.release()
+            self.lock.release()
 
-    def upload_intruder_image(self, file_path):
+    def upload(self, file):
 
-        # 🔥 retry (fix missing uploads)
-        for attempt in range(3):
+        for _ in range(3):
             try:
+                with open(file, "rb") as f:
 
-                with open(file_path, "rb") as img:
-
-                    files = {
-                        "file": img
-                    }
-
-                    data = {
-                        "device_id": DEVICE_ID,
-                        "activity": "Unauthorized activity detected"
-                    }
-
-                    response = requests.post(
+                    res = requests.post(
                         CLOUD_UPLOAD_URL,
-                        files=files,
-                        data=data,
+                        files={"file": f},
+                        data={"device_id": DEVICE_ID},
                         timeout=10
                     )
 
-                    print(f"[Core 18] Upload response: {response.status_code}")
-
-                    if response.status_code == 200:
+                    if res.status_code == 200:
                         return
 
-            except Exception as e:
-                print(f"[Core 18] Upload failed (attempt {attempt+1}):", e)
+            except:
+                pass
 
             time.sleep(2)
-
-        print("[Core 18] ❌ Upload permanently failed")
 
     def enable(self):
         self.freeze_active = True

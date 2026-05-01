@@ -1,37 +1,27 @@
+# ==============================
+# FILE 5: zephyr_cloud_server.py
+# ==============================
+
 import json
 import os
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File
-from fastapi.staticfiles import StaticFiles
 import time
 import hashlib
 import shutil
-import asyncio
-
-# 🔥 Firebase
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File
+from fastapi.staticfiles import StaticFiles
 import firebase_admin
 from firebase_admin import credentials, messaging
 
 app = FastAPI()
 
-# ✅ FIREBASE INIT (LOCAL + RENDER SAFE)
+# 🔥 Firebase Init
 if not firebase_admin._apps:
     try:
-        firebase_json = os.getenv("FIREBASE_KEY")
-
-        if firebase_json:
-            print("🌐 Using Firebase from ENV")
-            cred_dict = json.loads(firebase_json)
-            cred = credentials.Certificate(cred_dict)
-        else:
-            print("💻 Using local firebase_key.json")
-            cred = credentials.Certificate("firebase_key.json")
-
+        cred = credentials.Certificate("firebase_key.json")
         firebase_admin.initialize_app(cred)
-        print("✅ Firebase initialized successfully")
-
+        print("✅ Firebase Ready")
     except Exception as e:
-        print("❌ Firebase init failed:", e)
-
+        print("❌ Firebase error:", e)
 
 clients = {}
 fcm_tokens = {}
@@ -45,192 +35,66 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 app.mount("/intruders", StaticFiles(directory=UPLOAD_DIR), name="intruders")
 
-intruder_logs = []
 
-BASE_URL = "https://zephyr-altair-ai-server.onrender.com"
-
-
-# 🔐 TOKEN GENERATOR
 def generate_token(device_id, secret_key, action, timestamp):
     raw = f"{device_id}{secret_key}{timestamp}{action}"
     return hashlib.sha256(raw.encode()).hexdigest()
 
 
-# 🔥 FCM SEND
-def send_fcm_notification(token, title, body, data=None):
+def send_fcm(token, title, body, data):
     try:
         message = messaging.Message(
-            notification=messaging.Notification(
-                title=title,
-                body=body
-            ),
-            data=data or {},
+            notification=messaging.Notification(title=title, body=body),
+            data=data,
             token=token
         )
-
-        response = messaging.send(message)
-        print("✅ FCM sent:", response)
-
+        messaging.send(message)
+        print("✅ FCM sent")
     except Exception as e:
         print("❌ FCM error:", e)
 
 
-# 🔥 SAVE FCM TOKEN
 @app.post("/register_fcm")
 async def register_fcm(data: dict):
-    device_id = data.get("device_id")
-    token = data.get("fcm_token")
-
-    if not device_id or not token:
-        return {"error": "Missing data"}
-
-    fcm_tokens[device_id] = token
-    print(f"✅ FCM saved for {device_id}")
-
+    fcm_tokens[data["device_id"]] = data["fcm_token"]
     return {"status": "ok"}
 
 
-# 🔥 WEBSOCKET
 @app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
-    await websocket.accept()
+async def ws(ws: WebSocket):
+    await ws.accept()
     device_id = None
 
     try:
         while True:
-            message = await websocket.receive_text()
-            data = json.loads(message)
+            msg = json.loads(await ws.receive_text())
 
-            if data.get("type") == "register":
-                device_id = data.get("device_id")
-                clients[device_id] = websocket
-                print(f"[Cloud] ✅ {device_id} connected")
-
-            elif data.get("type") == "command":
-                target = data.get("target")
-                action = data.get("action")
-
-                if target in clients:
-                    secret = DEVICE_SECRETS.get(target)
-
-                    if not secret:
-                        print("❌ Unknown device")
-                        continue
-
-                    timestamp = int(time.time())
-                    token = generate_token(target, secret, action, timestamp)
-
-                    await clients[target].send_text(json.dumps({
-                        "type": "command",
-                        "action": action,
-                        "token": token,
-                        "timestamp": timestamp
-                    }))
-
-                    print(f"[Cloud] ⚡ WS command sent → {target}")
-
-                else:
-                    print(f"[Cloud] ❌ Target not found")
+            if msg["type"] == "register":
+                device_id = msg["device_id"]
+                clients[device_id] = ws
 
     except WebSocketDisconnect:
-        print(f"[Cloud] ⚠️ {device_id} disconnected")
-
-    finally:
         if device_id in clients:
             del clients[device_id]
 
 
-# 🔥 HEALTH
-@app.get("/")
-def home():
-    return {"status": "Zephyr Cloud Running 🚀"}
-
-
-# 🔥 MAIN COMMAND API (VERY IMPORTANT)
-@app.get("/send/{target}/{action}")
-async def send_command(target: str, action: str):
-
-    if target not in clients:
-        return {"error": "Device not connected"}
-
-    secret = DEVICE_SECRETS.get(target)
-
-    if not secret:
-        return {"error": "Unknown device"}
-
-    timestamp = int(time.time())
-    token = generate_token(target, secret, action, timestamp)
-
-    for i in range(3):
-        try:
-            await clients[target].send_text(json.dumps({
-                "type": "command",
-                "action": action,
-                "token": token,
-                "timestamp": timestamp
-            }))
-
-            print(f"[Cloud] 🚀 {action} → {target} (try {i+1})")
-            break
-
-        except Exception as e:
-            print(f"[Cloud] retry {i+1} failed:", e)
-            await asyncio.sleep(1)
-
-    return {"status": f"{action} sent to {target}"}
-
-
-# 🔥 INTRUDER UPLOAD
 @app.post("/upload_intruder")
-async def upload_intruder(
-    file: UploadFile = File(...),
-    device_id: str = "",
-    activity: str = "Intruder detected"
-):
-    try:
-        timestamp = int(time.time())
-        filename = f"{device_id}_{timestamp}.jpg"
-        file_path = os.path.join(UPLOAD_DIR, filename)
+async def upload(file: UploadFile = File(...), device_id: str = ""):
 
-        with open(file_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
+    filename = f"{device_id}_{int(time.time())}.jpg"
+    path = os.path.join(UPLOAD_DIR, filename)
 
-        image_url = f"{BASE_URL}/intruders/{filename}"
+    with open(path, "wb") as f:
+        shutil.copyfileobj(file.file, f)
 
-        print(f"[Cloud] 📸 Saved: {filename}")
+    url = f"https://zephyr-altair-ai-server.onrender.com/intruders/{filename}"
 
-        intruder_logs.append({
-            "device_id": device_id,
-            "image_url": image_url,
-            "activity": activity,
-            "timestamp": timestamp,
-            "time": time.strftime("%H:%M:%S"),
-            "date": time.strftime("%Y-%m-%d")
+    token = fcm_tokens.get(device_id)
+
+    if token:
+        send_fcm(token, "🚨 Intruder", "Detected", {
+            "type": "intruder",
+            "image_url": url
         })
 
-        # 🔥 SEND FCM
-        token = fcm_tokens.get(device_id)
-        if token:
-            send_fcm_notification(
-                token,
-                "🚨 Intruder Detected!",
-                activity,
-                {
-                    "type": "intruder",
-                    "image_url": image_url,
-                    "time": time.strftime("%H:%M:%S"),
-                    "date": time.strftime("%Y-%m-%d"),
-                    "activity": activity
-                }
-            )
-
-        return {"status": "uploaded", "image_url": image_url}
-
-    except Exception as e:
-        print("❌ Upload error:", e)
-        return {"error": str(e)}
-
-
-@app.get("/get_intruder_logs")
-def get_intruder_logs():
-    return intruder_logs
+    return {"status": "ok"}

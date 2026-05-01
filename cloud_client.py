@@ -1,3 +1,7 @@
+# ==============================
+# FILE 6: cloud_client.py
+# ==============================
+
 import asyncio
 import websockets
 import json
@@ -5,108 +9,116 @@ import requests
 import time
 import hashlib
 
+# 🔐 Device identity (must match server)
 DEVICE_ID = "160c02a2018e7132"
 SECRET_KEY = "c63bd8f574f9634e3f50bda3fd5cce15"
 
+# 🌐 Cloud WebSocket endpoint
 CLOUD_URL = "wss://zephyr-altair-ai-server.onrender.com/ws"
+
+# 🏠 Local control server
 LOCAL_SERVER = "http://127.0.0.1:5001"
 
-MAX_TIME_DIFF = 300  # 5 minutes
+# ⏱️ Token expiry tolerance
+MAX_TIME_DIFF = 300
 
 
-# 🔥 MATCH SERVER TOKEN LOGIC EXACTLY
+# ==============================
+# TOKEN GENERATION (SYNC WITH SERVER)
+# ==============================
 def generate_token(device_id, secret_key, action, timestamp):
     raw = f"{device_id}{secret_key}{timestamp}{action}"
     return hashlib.sha256(raw.encode()).hexdigest()
 
 
+# ==============================
+# MAIN CONNECTION LOOP (AUTO RECONNECT)
+# ==============================
 async def connect():
+
     while True:
         try:
-            print("🚀 Connecting to Zephyr Cloud...")
+            print("🌐 Connecting to Cloud...")
 
             async with websockets.connect(
                 CLOUD_URL,
-                ping_interval=30,   # 🔥 increased (fix timeout)
+                ping_interval=30,
                 ping_timeout=30
-            ) as websocket:
+            ) as ws:
 
-                await websocket.send(json.dumps({
+                # 📡 Register device
+                await ws.send(json.dumps({
                     "type": "register",
                     "device_id": DEVICE_ID
                 }))
 
-                print(f"✅ Connected as {DEVICE_ID}")
+                print("✅ Connected to cloud")
 
                 while True:
-                    try:
-                        message = await websocket.recv()
-                        data = json.loads(message)
+                    message = await ws.recv()
+                    data = json.loads(message)
 
-                        if data.get("type") == "command":
+                    if data.get("type") == "command":
 
-                            action = data.get("action")
-                            timestamp = data.get("timestamp")
-                            token = data.get("token")
+                        action = data.get("action")
+                        timestamp = data.get("timestamp")
+                        token = data.get("token")
 
-                            print(f"📩 Command received: {action}")
-                            print(f"   🕒 timestamp: {timestamp}")
-                            print(f"   🔑 token: {token}")
+                        # 🔐 Basic validation
+                        if not action or not timestamp or not token:
+                            print("❌ Invalid command payload")
+                            continue
 
-                            # 🔥 HARD CHECK
-                            if not action or not timestamp or not token:
-                                print("❌ Missing security data")
-                                continue
+                        try:
+                            timestamp = int(timestamp)
+                        except:
+                            continue
 
-                            try:
-                                timestamp = int(timestamp)
-                            except:
-                                print("❌ Invalid timestamp format")
-                                continue
+                        # ⏱️ Expiry check
+                        if abs(int(time.time()) - timestamp) > MAX_TIME_DIFF:
+                            print("❌ Expired command")
+                            continue
 
-                            # 🔥 TIME VALIDATION
-                            if abs(int(time.time()) - timestamp) > MAX_TIME_DIFF:
-                                print("❌ Expired request")
-                                continue
+                        # 🔐 Token verification
+                        expected = generate_token(
+                            DEVICE_ID,
+                            SECRET_KEY,
+                            action,
+                            timestamp
+                        )
 
-                            # 🔥 TOKEN VALIDATION (FIXED)
-                            expected_token = generate_token(
-                                DEVICE_ID,
-                                SECRET_KEY,
-                                action,
-                                timestamp
+                        if token != expected:
+                            print("❌ Invalid token")
+                            continue
+
+                        print(f"⚡ Executing: {action}")
+
+                        payload = {
+                            "device_id": DEVICE_ID,
+                            "timestamp": timestamp,
+                            "token": token
+                        }
+
+                        try:
+                            res = requests.post(
+                                f"{LOCAL_SERVER}/{action}",
+                                json=payload,
+                                timeout=5
                             )
+                            print("✅ Local response:", res.status_code)
 
-                            if token != expected_token:
-                                print("❌ Invalid token (possible hacker)")
-                                continue
-
-                            print("✅ Command verified")
-
-                            payload = {
-                                "device_id": DEVICE_ID,
-                                "timestamp": timestamp,
-                                "token": token
-                            }
-
-                            try:
-                                response = requests.post(
-                                    f"{LOCAL_SERVER}/{action}",
-                                    json=payload,
-                                    timeout=5
-                                )
-                                print(f"⚡ Local response: {response.status_code}")
-                            except Exception as e:
-                                print("❌ Local request failed:", e)
-
-                    except websockets.ConnectionClosed:
-                        print("⚠️ Connection lost. Reconnecting...")
-                        break
+                        except Exception as e:
+                            print("❌ Local error:", e)
 
         except Exception as e:
-            print("❌ Connection error:", e)
+            print("❌ Cloud connection error:", e)
 
+        # 🔁 Retry after delay
         await asyncio.sleep(3)
 
 
-asyncio.run(connect())
+# ==============================
+# ENTRY
+# ==============================
+if __name__ == "__main__":
+    asyncio.run(connect())

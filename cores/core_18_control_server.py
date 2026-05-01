@@ -1,3 +1,7 @@
+# ==============================
+# FILE 1: core_18_control_server.py
+# ==============================
+
 from flask import Flask, jsonify, request
 import os
 import json
@@ -5,15 +9,19 @@ import secrets
 import time
 import hashlib
 
+# 🔐 Path to trusted device file
 TRUSTED_DEVICE_PATH = "data/trusted_device.json"
 
-# 🔥 FIX: Increased tolerance (was 10)
-MAX_TIME_DIFF = 300  # 5 minutes
+# ⏱️ Max allowed timestamp difference (5 minutes)
+MAX_TIME_DIFF = 300
 
 
 def start_control_server(core18, port=5001):
     app = Flask("zephyr_control_server")
 
+    # ==============================
+    # LOAD TRUSTED DEVICE
+    # ==============================
     def load_device():
         try:
             if not os.path.exists(TRUSTED_DEVICE_PATH):
@@ -24,25 +32,35 @@ def start_control_server(core18, port=5001):
             print("[Control] Load device error:", e)
             return None
 
+    # ==============================
+    # SAVE TRUSTED DEVICE
+    # ==============================
     def save_device(data):
         os.makedirs("data", exist_ok=True)
         with open(TRUSTED_DEVICE_PATH, "w") as f:
             json.dump(data, f, indent=4)
 
+    # ==============================
+    # TOKEN GENERATOR (SECURITY)
+    # ==============================
     def generate_token(device_id, secret_key, action, timestamp):
         raw = f"{device_id}{secret_key}{timestamp}{action}"
         return hashlib.sha256(raw.encode()).hexdigest()
 
+    # ==============================
+    # VERIFY REQUEST SECURITY
+    # ==============================
     def verify_request(req):
         device = load_device()
 
+        # If no device paired → allow
         if not device:
             return True
 
         try:
             data = req.get_json(force=True)
         except:
-            return True
+            return False
 
         device_id = data.get("device_id")
         timestamp = data.get("timestamp")
@@ -50,38 +68,40 @@ def start_control_server(core18, port=5001):
         action = req.path.replace("/", "")
 
         if not all([device_id, timestamp, token]):
-            print("❌ Missing security data")
             return False
 
         try:
             timestamp = int(timestamp)
         except:
-            print("❌ Invalid timestamp")
             return False
 
+        # ⏱️ Check timestamp freshness
         if abs(int(time.time()) - timestamp) > MAX_TIME_DIFF:
-            print("❌ Expired request")
             return False
 
-        expected = generate_token(device["device_id"], device["secret_key"], action, timestamp)
+        expected = generate_token(
+            device["device_id"],
+            device["secret_key"],
+            action,
+            timestamp
+        )
 
-        if token != expected:
-            print("❌ Invalid token (possible hacker)")
-            return False
+        return token == expected
 
-        print("✅ Request verified")
-        return True
+    # ==============================
+    # ROUTES
+    # ==============================
 
     @app.route("/", methods=["GET"])
     def home():
-        return jsonify({"status": "Local Control Server Running 🚀"})
+        return jsonify({"status": "Local Control Server Running"})
 
     @app.route("/pair", methods=["POST"])
     def pair():
         data = request.get_json(force=True)
 
         device_id = data.get("device_id")
-        device_name = data.get("device_name", "Unknown Device")
+        device_name = data.get("device_name", "Unknown")
 
         secret_key = secrets.token_hex(16)
 
@@ -91,22 +111,13 @@ def start_control_server(core18, port=5001):
             "secret_key": secret_key
         })
 
-        print(f"[Control] 🔗 Paired with {device_name}")
-
         return jsonify({
             "status": "paired",
             "secret_key": secret_key
         })
 
-    @app.route("/test", methods=["POST"])
-    def test():
-        print("🔥 TEST COMMAND RECEIVED FROM CLOUD")
-        return jsonify({"status": "test success"})
-
     @app.route("/lock", methods=["POST"])
     def lock():
-        print("[Control] 🔒 Lock command received")
-
         if not verify_request(request):
             return jsonify({"error": "unauthorized"}), 401
 
@@ -115,8 +126,6 @@ def start_control_server(core18, port=5001):
 
     @app.route("/unlock", methods=["POST"])
     def unlock():
-        print("[Control] 🔓 Unlock command received")
-
         if not verify_request(request):
             return jsonify({"error": "unauthorized"}), 401
 
@@ -127,6 +136,5 @@ def start_control_server(core18, port=5001):
     def status():
         return jsonify({"state": core18.security_state.value})
 
-    print(f"[Control] 🚀 Server running on port {port}")
-
-    app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
+    print(f"[Control] Running on {port}")
+    app.run(host="0.0.0.0", port=port, debug=False)

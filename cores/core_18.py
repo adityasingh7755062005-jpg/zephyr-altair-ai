@@ -1,3 +1,7 @@
+# ==============================
+# FILE 4: core_18.py
+# ==============================
+
 from cores.core_18_security_state import SecurityState
 from cores.trusted_device_manager import TrustedDeviceManager
 from cores.core_18_control_server import start_control_server
@@ -29,27 +33,16 @@ class Core18:
 
         self.check_trusted_device()
 
-        self.cloud_client = None
-        print("[Core 18] Cloud disabled (local testing mode)")
-
         self._start_session_watcher()
         self._start_login_watcher()
 
         self.login_watcher.arm()
 
     def _on_windows_lock(self):
-        print("[Core 18] Windows LOCK detected")
-
-        self.login_watcher.arm()
-
         self.freeze_overlay.show()
         self.intruder_detector.enable()
 
     def _on_windows_unlock(self):
-        print("[Core 18] Windows UNLOCK detected")
-
-        # 🔥 FIX: DO NOTHING HERE
-        # overlay should NOT hide automatically
         pass
 
     def _start_session_watcher(self):
@@ -57,14 +50,7 @@ class Core18:
             on_lock=self._on_windows_lock,
             on_unlock=self._on_windows_unlock
         )
-
-        threading.Thread(
-            target=watcher.start,
-            daemon=True
-        ).start()
-
-    def _on_desktop_ready(self):
-        print("[Core 18] Desktop detected")
+        threading.Thread(target=watcher.start, daemon=True).start()
 
     def _start_login_watcher(self):
         threading.Thread(
@@ -81,31 +67,19 @@ class Core18:
 
     def check_trusted_device(self):
         device = self.trusted_device_manager.load()
-
         if device:
-            print("[Core 18] Trusted device found")
             self.security_state = SecurityState.UNLOCKED
-        else:
-            print("[Core 18] No trusted device found")
-            print("[Core 18] Waiting for manual pairing...")
 
     def lock(self):
-        print("[Core 18] Lock requested (LOCAL)")
-
-        self.login_watcher.arm()
-
         self.freeze_overlay.show()
         self.intruder_detector.enable()
 
         try:
             ctypes.windll.user32.LockWorkStation()
         except Exception as e:
-            print("[Core 18 ERROR] Lock failed:", e)
+            print("[ERROR]", e)
 
     def unlock(self):
-        print("[Core 18] Unlock requested (LOCAL)")
-
         self.security_state = SecurityState.UNLOCKED
-
         self.freeze_overlay.hide()
         self.intruder_detector.disable()
