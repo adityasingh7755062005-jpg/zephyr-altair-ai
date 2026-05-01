@@ -13,18 +13,27 @@ from firebase_admin import credentials, messaging
 
 app = FastAPI()
 
-# ✅ FIX: LOAD FIREBASE FROM ENV (RENDER SAFE)
+# ✅ HYBRID FIREBASE INIT (LOCAL + RENDER)
 if not firebase_admin._apps:
-    firebase_json = os.getenv("FIREBASE_KEY")
+    try:
+        firebase_json = os.getenv("FIREBASE_KEY")
 
-    if not firebase_json:
-        raise Exception("❌ FIREBASE_KEY not set in environment")
+        if firebase_json:
+            # 🌐 Render / Cloud
+            print("🌐 Using Firebase from ENV")
+            cred_dict = json.loads(firebase_json)
+            cred = credentials.Certificate(cred_dict)
+        else:
+            # 💻 Local
+            print("💻 Using local firebase_key.json")
+            cred = credentials.Certificate("firebase_key.json")
 
-    cred_dict = json.loads(firebase_json)
-    cred = credentials.Certificate(cred_dict)
-    firebase_admin.initialize_app(cred)
+        firebase_admin.initialize_app(cred)
+        print("✅ Firebase initialized successfully")
 
-    print("✅ Firebase initialized (Render safe)")
+    except Exception as e:
+        print("❌ Firebase init failed:", e)
+
 
 clients = {}
 
@@ -166,6 +175,8 @@ async def upload_intruder(
                     "activity": activity
                 }
             )
+        else:
+            print("⚠️ No FCM token found for device")
 
         return {"status": "uploaded", "image_url": image_url}
 
