@@ -13,18 +13,16 @@ from firebase_admin import credentials, messaging
 
 app = FastAPI()
 
-# ✅ HYBRID FIREBASE INIT (LOCAL + RENDER)
+# ✅ FIREBASE INIT (LOCAL + RENDER SAFE)
 if not firebase_admin._apps:
     try:
         firebase_json = os.getenv("FIREBASE_KEY")
 
         if firebase_json:
-            # 🌐 Render / Cloud
             print("🌐 Using Firebase from ENV")
             cred_dict = json.loads(firebase_json)
             cred = credentials.Certificate(cred_dict)
         else:
-            # 💻 Local
             print("💻 Using local firebase_key.json")
             cred = credentials.Certificate("firebase_key.json")
 
@@ -36,8 +34,6 @@ if not firebase_admin._apps:
 
 
 clients = {}
-
-# 🔥 STORE FCM TOKENS
 fcm_tokens = {}
 
 DEVICE_SECRETS = {
@@ -54,12 +50,13 @@ intruder_logs = []
 BASE_URL = "https://zephyr-altair-ai-server.onrender.com"
 
 
+# 🔐 TOKEN GENERATOR
 def generate_token(device_id, secret_key, action, timestamp):
     raw = f"{device_id}{secret_key}{timestamp}{action}"
     return hashlib.sha256(raw.encode()).hexdigest()
 
 
-# 🔥 SEND FCM
+# 🔥 FCM SEND
 def send_fcm_notification(token, title, body, data=None):
     try:
         message = messaging.Message(
@@ -78,7 +75,7 @@ def send_fcm_notification(token, title, body, data=None):
         print("❌ FCM error:", e)
 
 
-# 🔥 SAVE TOKEN FROM APP
+# 🔥 SAVE FCM TOKEN
 @app.post("/register_fcm")
 async def register_fcm(data: dict):
     device_id = data.get("device_id")
@@ -93,6 +90,7 @@ async def register_fcm(data: dict):
     return {"status": "ok"}
 
 
+# 🔥 WEBSOCKET
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
@@ -113,10 +111,24 @@ async def websocket_endpoint(websocket: WebSocket):
                 action = data.get("action")
 
                 if target in clients:
+                    secret = DEVICE_SECRETS.get(target)
+
+                    if not secret:
+                        print("❌ Unknown device")
+                        continue
+
+                    timestamp = int(time.time())
+                    token = generate_token(target, secret, action, timestamp)
+
                     await clients[target].send_text(json.dumps({
                         "type": "command",
-                        "action": action
+                        "action": action,
+                        "token": token,
+                        "timestamp": timestamp
                     }))
+
+                    print(f"[Cloud] ⚡ WS command sent → {target}")
+
                 else:
                     print(f"[Cloud] ❌ Target not found")
 
@@ -128,11 +140,47 @@ async def websocket_endpoint(websocket: WebSocket):
             del clients[device_id]
 
 
+# 🔥 HEALTH
 @app.get("/")
 def home():
     return {"status": "Zephyr Cloud Running 🚀"}
 
 
+# 🔥 MAIN COMMAND API (VERY IMPORTANT)
+@app.get("/send/{target}/{action}")
+async def send_command(target: str, action: str):
+
+    if target not in clients:
+        return {"error": "Device not connected"}
+
+    secret = DEVICE_SECRETS.get(target)
+
+    if not secret:
+        return {"error": "Unknown device"}
+
+    timestamp = int(time.time())
+    token = generate_token(target, secret, action, timestamp)
+
+    for i in range(3):
+        try:
+            await clients[target].send_text(json.dumps({
+                "type": "command",
+                "action": action,
+                "token": token,
+                "timestamp": timestamp
+            }))
+
+            print(f"[Cloud] 🚀 {action} → {target} (try {i+1})")
+            break
+
+        except Exception as e:
+            print(f"[Cloud] retry {i+1} failed:", e)
+            await asyncio.sleep(1)
+
+    return {"status": f"{action} sent to {target}"}
+
+
+# 🔥 INTRUDER UPLOAD
 @app.post("/upload_intruder")
 async def upload_intruder(
     file: UploadFile = File(...),
@@ -160,7 +208,7 @@ async def upload_intruder(
             "date": time.strftime("%Y-%m-%d")
         })
 
-        # 🔥 SEND FCM USING STORED TOKEN
+        # 🔥 SEND FCM
         token = fcm_tokens.get(device_id)
         if token:
             send_fcm_notification(
@@ -175,8 +223,6 @@ async def upload_intruder(
                     "activity": activity
                 }
             )
-        else:
-            print("⚠️ No FCM token found for device")
 
         return {"status": "uploaded", "image_url": image_url}
 
