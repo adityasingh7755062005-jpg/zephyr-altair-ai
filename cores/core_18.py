@@ -12,8 +12,8 @@ from cores.core_18_freeze_overlay import FreezeOverlay
 from cores.core_18_intruder_detector import IntruderDetector
 
 # 🔥 NETWORK LAYER
-from network.connection_manager import ConnectionManager
-from network.cloud_client import CloudClient
+from connection_manager import ConnectionManager
+from cloud_client import CloudClient
 
 import threading
 import ctypes
