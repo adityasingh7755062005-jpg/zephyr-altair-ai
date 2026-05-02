@@ -17,7 +17,8 @@ class LoginWatcher:
     def _explorer_running(self):
         for proc in psutil.process_iter(["name"]):
             try:
-                if proc.info["name"] and proc.info["name"].lower() == "explorer.exe":
+                name = proc.info.get("name")
+                if name and name.lower() == "explorer.exe":
                     return True
             except:
                 continue
@@ -31,9 +32,11 @@ class LoginWatcher:
                 explorer_now = self._explorer_running()
 
                 if self._armed and explorer_now and not self._last_explorer:
-                    print("[Core 18] Desktop detected (Explorer appeared)")
+                    print("[Core 18] Desktop detected")
                     self._armed = False
-                    self.on_login_callback()
+
+                    if self.on_login_callback:
+                        self.on_login_callback()
 
                 self._last_explorer = explorer_now
                 time.sleep(0.4)

@@ -1,5 +1,5 @@
 # ==============================
-# FILE: cores/core_18.py (FINAL CLEAN + WIRED)
+# FILE: cores/core_18.py (FIXED)
 # ==============================
 
 from cores.core_18_security_state import SecurityState
@@ -9,7 +9,7 @@ from cores.core_18_session_watcher import SessionWatcher
 from cores.core_18_freeze_overlay import FreezeOverlay
 from cores.core_18_intruder_detector import IntruderDetector
 
-# 🔥 NEW NETWORK LAYER
+# 🔥 NETWORK
 from network.local_server import start_local_server
 from network.local_discovery import start_local_discovery
 from network.connection_manager import ConnectionManager
@@ -27,13 +27,14 @@ class Core18:
         self.security_state = SecurityState.LOCKED
         self.trusted_device_manager = TrustedDeviceManager()
 
+        # ✅ FIX: callback now exists
         self.login_watcher = LoginWatcher(self._on_desktop_ready)
 
         self.freeze_overlay = FreezeOverlay()
         self.intruder_detector = IntruderDetector()
 
         # ==============================
-        # 🔥 LOCAL SYSTEMS (NEW)
+        # 🌐 LOCAL SYSTEMS
         # ==============================
         start_local_server(self)
         start_local_discovery()
@@ -48,26 +49,44 @@ class Core18:
         self.login_watcher.arm()
 
         # ==============================
-        # 🔥 CONNECTION MANAGER (BRAIN)
+        # 🔥 CONNECTION MANAGER
         # ==============================
         self.connection = ConnectionManager()
         print("[Core 18] Connection Manager started")
 
         # ==============================
-        # 🔥 CLOUD CLIENT (CLOUD ONLY)
+        # ☁️ CLOUD
         # ==============================
         self.cloud = CloudClient(self, self.connection)
         print("[Core 18] Cloud Client started")
 
     # ==============================
+    # ✅ FIXED FUNCTION (IMPORTANT)
+    # ==============================
+    def _on_desktop_ready(self):
+        print("[Core 18] ✅ Desktop Ready Triggered")
+
+        # If system was locked → keep protection ON
+        if self.security_state == SecurityState.LOCKED:
+            print("[Core 18] System locked → enabling protection")
+            self.freeze_overlay.show()
+            self.intruder_detector.enable()
+
+        else:
+            print("[Core 18] Trusted device → unlocked")
+            self.freeze_overlay.hide()
+            self.intruder_detector.disable()
+
+    # ==============================
     # WINDOWS EVENTS
     # ==============================
     def _on_windows_lock(self):
+        print("[Core 18] Windows Locked")
         self.freeze_overlay.show()
         self.intruder_detector.enable()
 
     def _on_windows_unlock(self):
-        pass
+        print("[Core 18] Windows Unlocked")
 
     # ==============================
     # WATCHERS
@@ -91,6 +110,7 @@ class Core18:
     def check_trusted_device(self):
         device = self.trusted_device_manager.load()
         if device:
+            print("[Core 18] Trusted device found → unlocked")
             self.security_state = SecurityState.UNLOCKED
 
     # ==============================
@@ -99,6 +119,7 @@ class Core18:
     def lock(self):
         print("[Core 18] 🔒 Lock triggered")
 
+        self.security_state = SecurityState.LOCKED
         self.freeze_overlay.show()
         self.intruder_detector.enable()
 
