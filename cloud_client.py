@@ -1,5 +1,5 @@
 # ==============================
-# FILE: network/cloud_client.py
+# FILE: cloud_client.py (FINAL)
 # ==============================
 
 import asyncio
@@ -7,105 +7,90 @@ import websockets
 import json
 import time
 import hashlib
+import threading
+
+DEVICE_ID = "160c02a2018e7132"
+SECRET_KEY = "c63bd8f574f9634e3f50bda3fd5cce15"
+CLOUD_URL = "wss://zephyr-altair-ai-server.onrender.com/ws"
+
+MAX_TIME_DIFF = 300
 
 
 class CloudClient:
-    """
-    🔥 Pure Cloud Listener
-    - Only listens from cloud
-    - No local HTTP calls
-    - Directly triggers Core18
-    """
 
-    def __init__(self, core):
+    def __init__(self, core, connection):
         self.core = core
+        self.connection = connection
+        self.running = True
 
-        self.DEVICE_ID = "160c02a2018e7132"
-        self.SECRET_KEY = "c63bd8f574f9634e3f50bda3fd5cce15"
+        threading.Thread(
+            target=self._start,
+            daemon=True
+        ).start()
 
-        self.CLOUD_URL = "wss://zephyr-altair-ai-server.onrender.com/ws"
-        self.MAX_TIME_DIFF = 300
+    def _start(self):
+        asyncio.run(self._loop())
 
-    # ==============================
-    # 🔐 TOKEN GENERATION
-    # ==============================
-    def generate_token(self, device_id, secret_key, action, timestamp):
-        raw = f"{device_id}{secret_key}{timestamp}{action}"
+    def generate_token(self, action, timestamp):
+        raw = f"{DEVICE_ID}{SECRET_KEY}{timestamp}{action}"
         return hashlib.sha256(raw.encode()).hexdigest()
 
-    # ==============================
-    # 🌐 CLOUD LOOP
-    # ==============================
-    async def connect(self):
+    async def _loop(self):
 
-        while True:
+        while self.running:
             try:
-                print("🌐 [CloudClient] Connecting...")
+                print("🌐 [Cloud] Connecting...")
 
                 async with websockets.connect(
-                    self.CLOUD_URL,
-                    ping_interval=30,
-                    ping_timeout=30
+                    CLOUD_URL,
+                    ping_interval=20,
+                    ping_timeout=20
                 ) as ws:
 
-                    # 🔥 Register device
                     await ws.send(json.dumps({
                         "type": "register",
-                        "device_id": self.DEVICE_ID
+                        "device_id": DEVICE_ID
                     }))
 
-                    print("✅ [CloudClient] Connected")
+                    self.connection.update_cloud(True)
+                    print("✅ [Cloud] Connected")
 
                     while True:
-                        message = await ws.recv()
-                        data = json.loads(message)
+                        msg = await ws.recv()
+                        data = json.loads(msg)
 
-                        if data.get("type") == "command":
-
-                            action = data.get("action")
-                            timestamp = data.get("timestamp")
-                            token = data.get("token")
-
-                            # ==============================
-                            # 🔐 VALIDATION
-                            # ==============================
-                            if not action or not timestamp or not token:
-                                print("❌ Invalid payload")
-                                continue
-
-                            try:
-                                timestamp = int(timestamp)
-                            except:
-                                print("❌ Invalid timestamp")
-                                continue
-
-                            if abs(int(time.time()) - timestamp) > self.MAX_TIME_DIFF:
-                                print("❌ Expired command")
-                                continue
-
-                            expected = self.generate_token(
-                                self.DEVICE_ID,
-                                self.SECRET_KEY,
-                                action,
-                                timestamp
-                            )
-
-                            if token != expected:
-                                print("❌ Invalid token")
-                                continue
-
-                            print(f"⚡ [CloudClient] Executing: {action}")
-
-                            # ==============================
-                            # 🔥 DIRECT CORE EXECUTION
-                            # ==============================
-                            if action == "lock":
-                                self.core.lock()
-
-                            elif action == "unlock":
-                                self.core.unlock()
+                        await self._handle(data)
 
             except Exception as e:
-                print("❌ [CloudClient] Error:", e)
+                print("❌ [Cloud]", e)
+                self.connection.update_cloud(False)
 
             await asyncio.sleep(3)
+
+    async def _handle(self, data):
+
+        if data.get("type") != "command":
+            return
+
+        action = data.get("action")
+        timestamp = data.get("timestamp")
+        token = data.get("token")
+
+        if not action or not timestamp or not token:
+            return
+
+        if abs(int(time.time()) - int(timestamp)) > MAX_TIME_DIFF:
+            return
+
+        expected = self.generate_token(action, int(timestamp))
+
+        if token != expected:
+            return
+
+        print(f"⚡ [Cloud] {action}")
+
+        if action == "lock":
+            self.core.lock()
+
+        elif action == "unlock":
+            self.core.unlock()

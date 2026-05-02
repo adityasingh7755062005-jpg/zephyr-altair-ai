@@ -1,23 +1,22 @@
 # ==============================
-# FILE 4: core_18.py (FINAL CLEAN)
+# FILE: cores/core_18.py (FINAL CLEAN + WIRED)
 # ==============================
 
 from cores.core_18_security_state import SecurityState
 from cores.trusted_device_manager import TrustedDeviceManager
-from cores.core_18_control_server import start_control_server
 from cores.core_18_login_watcher import LoginWatcher
 from cores.core_18_session_watcher import SessionWatcher
-from cores.core_18_discovery_server import start_discovery_server
 from cores.core_18_freeze_overlay import FreezeOverlay
 from cores.core_18_intruder_detector import IntruderDetector
 
-# 🔥 NETWORK LAYER
-from connection_manager import ConnectionManager
+# 🔥 NEW NETWORK LAYER
+from network.local_server import start_local_server
+from network.local_discovery import start_local_discovery
+from network.connection_manager import ConnectionManager
 from cloud_client import CloudClient
 
 import threading
 import ctypes
-import asyncio
 
 
 class Core18:
@@ -34,39 +33,34 @@ class Core18:
         self.intruder_detector = IntruderDetector()
 
         # ==============================
-        # 🔥 LOCAL SYSTEMS
+        # 🔥 LOCAL SYSTEMS (NEW)
         # ==============================
-        self.start_control_listener()
-        start_discovery_server()
+        start_local_server(self)
+        start_local_discovery()
 
+        # ==============================
+        # SYSTEM INIT
+        # ==============================
         self.check_trusted_device()
-
         self._start_session_watcher()
         self._start_login_watcher()
 
         self.login_watcher.arm()
 
         # ==============================
-        # 🔥 CONNECTION MANAGER (MAIN)
+        # 🔥 CONNECTION MANAGER (BRAIN)
         # ==============================
-        self.connection = ConnectionManager(self)
+        self.connection = ConnectionManager()
         print("[Core 18] Connection Manager started")
 
         # ==============================
-        # 🔥 OPTIONAL CLOUD LISTENER
-        # (pure cloud, no local HTTP)
+        # 🔥 CLOUD CLIENT (CLOUD ONLY)
         # ==============================
-        self.cloud_client = CloudClient(self)
-
-        threading.Thread(
-            target=lambda: asyncio.run(self.cloud_client.connect()),
-            daemon=True
-        ).start()
-
+        self.cloud = CloudClient(self, self.connection)
         print("[Core 18] Cloud Client started")
 
     # ==============================
-    # 🔒 WINDOWS EVENTS
+    # WINDOWS EVENTS
     # ==============================
     def _on_windows_lock(self):
         self.freeze_overlay.show()
@@ -92,22 +86,15 @@ class Core18:
         ).start()
 
     # ==============================
-    # LOCAL CONTROL SERVER
+    # TRUSTED DEVICE
     # ==============================
-    def start_control_listener(self):
-        threading.Thread(
-            target=start_control_server,
-            args=(self, 5001),
-            daemon=True
-        ).start()
-
     def check_trusted_device(self):
         device = self.trusted_device_manager.load()
         if device:
             self.security_state = SecurityState.UNLOCKED
 
     # ==============================
-    # 🔐 CORE ACTIONS
+    # CORE ACTIONS
     # ==============================
     def lock(self):
         print("[Core 18] 🔒 Lock triggered")
