@@ -1,100 +1,69 @@
 # ==============================
-# FILE: network/local_server.py
+# FILE: network/local_server.py (CLEAN + FIXED)
 # ==============================
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 import threading
 import time
+import logging
 
-# ==============================
-# CONFIG
-# ==============================
+# 🔥 REMOVE UVICORN ACCESS LOG SPAM
+logging.getLogger("uvicorn.access").disabled = True
+
 HOST = "0.0.0.0"
 PORT = 5001
 
-# ==============================
-# MAIN SERVER CLASS
-# ==============================
+
 class LocalServer:
-    """
-    🔥 Pure LOCAL server
-    - Handles only local network requests
-    - No cloud logic
-    """
 
     def __init__(self, core):
         self.core = core
         self.app = FastAPI()
-
         self._setup_routes()
 
-    # ==============================
-    # ROUTES
-    # ==============================
     def _setup_routes(self):
 
-        # 🔥 HEALTH CHECK (VERY IMPORTANT)
         @self.app.get("/")
         async def home():
-            return {"status": "Zephyr Local Server Running 🚀"}
+            return {"status": "Zephyr Local Server Running"}
 
         @self.app.get("/ping")
         async def ping():
-            return {
-                "status": "alive",
-                "time": int(time.time())
-            }
+            return {"status": "alive", "time": int(time.time())}
 
-        # 🔒 LOCK
-        @self.app.post("/lock")
+        # ✅ FIX: allow GET + POST
+        @self.app.api_route("/lock", methods=["GET", "POST"])
         async def lock(request: Request):
-            print("📥 LOCAL LOCK REQUEST")
-
+            print("📥 lock")
             try:
                 self.core.lock()
                 return {"status": "locked"}
             except Exception as e:
-                print("❌ Lock error:", e)
-                return JSONResponse(
-                    status_code=500,
-                    content={"error": str(e)}
-                )
+                return JSONResponse(status_code=500, content={"error": str(e)})
 
-        # 🔓 UNLOCK
-        @self.app.post("/unlock")
+        @self.app.api_route("/unlock", methods=["GET", "POST"])
         async def unlock(request: Request):
-            print("📥 LOCAL UNLOCK REQUEST")
-
+            print("📥 unlock")
             try:
                 self.core.unlock()
                 return {"status": "unlocked"}
             except Exception as e:
-                print("❌ Unlock error:", e)
-                return JSONResponse(
-                    status_code=500,
-                    content={"error": str(e)}
-                )
+                return JSONResponse(status_code=500, content={"error": str(e)})
 
-    # ==============================
-    # START SERVER
-    # ==============================
     def start(self):
         import uvicorn
 
-        print(f"[LocalServer] 🚀 Running on {HOST}:{PORT}")
+        print(f"[LocalServer] Running on {HOST}:{PORT}")
 
         uvicorn.run(
             self.app,
             host=HOST,
             port=PORT,
-            log_level="info"
+            log_level="error"  # 🔥 CLEAN OUTPUT
         )
 
 
-# ==============================
-# THREAD START HELPER
-# ==============================
 def start_local_server(core):
     server = LocalServer(core)
 

@@ -1,5 +1,5 @@
 # ==============================
-# FILE: cloud_client.py (FINAL)
+# FILE: cloud_client.py (CLEAN)
 # ==============================
 
 import asyncio
@@ -39,8 +39,6 @@ class CloudClient:
 
         while self.running:
             try:
-                print("🌐 [Cloud] Connecting...")
-
                 async with websockets.connect(
                     CLOUD_URL,
                     ping_interval=20,
@@ -53,16 +51,14 @@ class CloudClient:
                     }))
 
                     self.connection.update_cloud(True)
-                    print("✅ [Cloud] Connected")
+                    print("🌐 Cloud Connected")
 
                     while True:
                         msg = await ws.recv()
                         data = json.loads(msg)
-
                         await self._handle(data)
 
-            except Exception as e:
-                print("❌ [Cloud]", e)
+            except:
                 self.connection.update_cloud(False)
 
             await asyncio.sleep(3)
@@ -87,7 +83,7 @@ class CloudClient:
         if token != expected:
             return
 
-        print(f"⚡ [Cloud] {action}")
+        print(f"⚡ {action}")
 
         if action == "lock":
             self.core.lock()
