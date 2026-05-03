@@ -1,5 +1,5 @@
 # ==============================
-# FILE: network/local_server.py (CLEAN - NO TOKEN)
+# FILE: network/local_server.py (CLEAN - NO TOKEN + IP PRINT)
 # ==============================
 
 from fastapi import FastAPI, Request
@@ -54,8 +54,24 @@ class LocalServer:
 
     def start(self):
         import uvicorn
+        import socket
+
+        # 🔥 Get correct local IP (works reliably)
+        def get_local_ip():
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            try:
+                s.connect(("8.8.8.8", 80))
+                ip = s.getsockname()[0]
+            except:
+                ip = "Unable to detect"
+            finally:
+                s.close()
+            return ip
+
+        local_ip = get_local_ip()
 
         print(f"[LocalServer] Running on {HOST}:{PORT}")
+        print(f"🌐 Access from phone: http://{local_ip}:{PORT}")
 
         uvicorn.run(
             self.app,
