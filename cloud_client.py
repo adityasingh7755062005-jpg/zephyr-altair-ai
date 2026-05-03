@@ -1,5 +1,5 @@
 # ==============================
-# FILE: cloud_client.py (CLEAN)
+# FILE: cloud_client.py (FINAL CLEAN + FULL LOGS)
 # ==============================
 
 import asyncio
@@ -39,6 +39,8 @@ class CloudClient:
 
         while self.running:
             try:
+                print("🌐 Connecting to cloud...")
+
                 async with websockets.connect(
                     CLOUD_URL,
                     ping_interval=20,
@@ -51,14 +53,16 @@ class CloudClient:
                     }))
 
                     self.connection.update_cloud(True)
-                    print("🌐 Cloud Connected")
+
+                    print(f"✅ Connected as {DEVICE_ID}")
 
                     while True:
                         msg = await ws.recv()
                         data = json.loads(msg)
                         await self._handle(data)
 
-            except:
+            except Exception as e:
+                print("❌ Cloud connection lost")
                 self.connection.update_cloud(False)
 
             await asyncio.sleep(3)
@@ -72,21 +76,30 @@ class CloudClient:
         timestamp = data.get("timestamp")
         token = data.get("token")
 
+        print(f"📩 Command received: {action}")
+        print(f"🕒 timestamp: {timestamp}")
+        print(f"🔑 token: {token}")
+
         if not action or not timestamp or not token:
+            print("❌ Missing security data")
             return
 
         if abs(int(time.time()) - int(timestamp)) > MAX_TIME_DIFF:
+            print("❌ Expired request")
             return
 
         expected = self.generate_token(action, int(timestamp))
 
         if token != expected:
+            print("❌ Invalid token")
             return
 
-        print(f"⚡ {action}")
+        print("✅ Command verified")
 
         if action == "lock":
+            print("[Control] 🔒 Lock (CLOUD)")
             self.core.lock()
 
         elif action == "unlock":
+            print("[Control] 🔓 Unlock (CLOUD)")
             self.core.unlock()

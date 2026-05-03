@@ -1,5 +1,5 @@
 # ==============================
-# FILE: cores/core_18.py (CLEAN)
+# FILE: cores/core_18.py (FINAL CLEAN LOGS)
 # ==============================
 
 from cores.core_18_security_state import SecurityState
@@ -21,7 +21,7 @@ import ctypes
 class Core18:
 
     def __init__(self):
-        print("[Core 18] Booting...")
+        print("🚀 Zephyr Altair AI - Starting System")
 
         self.security_state = SecurityState.LOCKED
         self.trusted_device_manager = TrustedDeviceManager()
@@ -41,11 +41,11 @@ class Core18:
         self.login_watcher.arm()
 
         self.connection = ConnectionManager()
-
         self.cloud = CloudClient(self, self.connection)
 
-        print("[Core 18] initialized successfully")
-        print("Security system active")
+        print("✅ Core 18 initialized successfully")
+        print("🔐 Security system active")
+        print("⏳ Waiting for device connection...")
 
     def _on_desktop_ready(self):
         print("[Core 18] Desktop Ready")
@@ -58,11 +58,12 @@ class Core18:
             self.intruder_detector.disable()
 
     def _on_windows_lock(self):
+        print("[Core 18] Windows Locked")
         self.freeze_overlay.show()
         self.intruder_detector.enable()
 
     def _on_windows_unlock(self):
-        pass
+        print("[Core 18] Windows Unlocked")
 
     def _start_session_watcher(self):
         watcher = SessionWatcher(
@@ -84,7 +85,7 @@ class Core18:
             self.security_state = SecurityState.UNLOCKED
 
     def lock(self):
-        print("🔒 Lock")
+        print("[Core 18] 🔒 Lock requested")
 
         self.security_state = SecurityState.LOCKED
         self.freeze_overlay.show()
@@ -96,8 +97,8 @@ class Core18:
             print("[ERROR]", e)
 
     def unlock(self):
-        print("🔓 Unlock")
+        print("[Core 18] 🔓 Unlock requested")
 
         self.security_state = SecurityState.UNLOCKED
         self.freeze_overlay.hide()
-        self.intruder_detector.disable() 
+        self.intruder_detector.disable()
