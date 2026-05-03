@@ -1,19 +1,14 @@
 # ==============================
-# FILE: cloud_client.py (FINAL CLEAN + FULL LOGS)
+# FILE: cloud_client.py (CLEAN - NO TOKEN)
 # ==============================
 
 import asyncio
 import websockets
 import json
-import time
-import hashlib
 import threading
 
 DEVICE_ID = "160c02a2018e7132"
-SECRET_KEY = "c63bd8f574f9634e3f50bda3fd5cce15"
 CLOUD_URL = "wss://zephyr-altair-ai-server.onrender.com/ws"
-
-MAX_TIME_DIFF = 300
 
 
 class CloudClient:
@@ -30,10 +25,6 @@ class CloudClient:
 
     def _start(self):
         asyncio.run(self._loop())
-
-    def generate_token(self, action, timestamp):
-        raw = f"{DEVICE_ID}{SECRET_KEY}{timestamp}{action}"
-        return hashlib.sha256(raw.encode()).hexdigest()
 
     async def _loop(self):
 
@@ -61,7 +52,7 @@ class CloudClient:
                         data = json.loads(msg)
                         await self._handle(data)
 
-            except Exception as e:
+            except Exception:
                 print("❌ Cloud connection lost")
                 self.connection.update_cloud(False)
 
@@ -73,28 +64,12 @@ class CloudClient:
             return
 
         action = data.get("action")
-        timestamp = data.get("timestamp")
-        token = data.get("token")
 
-        print(f"📩 Command received: {action}")
-        print(f"🕒 timestamp: {timestamp}")
-        print(f"🔑 token: {token}")
+        print(f"📩 Command received (CLOUD): {action}")
 
-        if not action or not timestamp or not token:
-            print("❌ Missing security data")
+        if not action:
+            print("❌ Invalid command")
             return
-
-        if abs(int(time.time()) - int(timestamp)) > MAX_TIME_DIFF:
-            print("❌ Expired request")
-            return
-
-        expected = self.generate_token(action, int(timestamp))
-
-        if token != expected:
-            print("❌ Invalid token")
-            return
-
-        print("✅ Command verified")
 
         if action == "lock":
             print("[Control] 🔒 Lock (CLOUD)")
