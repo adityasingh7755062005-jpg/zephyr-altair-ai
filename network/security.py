@@ -5,13 +5,38 @@ import hashlib
 SECRET = b"zephyr_secret_key"
 VALIDITY_SECONDS = 120
 
-# ✅ STORE USED NONCES
+# ✅ STORE USED NONCES (nonce → timestamp)
 used_nonces = {}
+
+# ✅ CLEANUP INTERVAL CONTROL (avoid cleaning every request heavily)
+_last_cleanup = 0
+CLEANUP_INTERVAL = 10  # seconds
 
 
 def generate_signature(command, timestamp, device_id, nonce):
     message = f"{command}:{timestamp}:{device_id}:{nonce}".encode()
     return hmac.new(SECRET, message, hashlib.sha256).hexdigest()
+
+
+def cleanup_nonces():
+    """Remove expired nonces to prevent memory growth"""
+    global _last_cleanup
+
+    now = time.time()
+
+    # 🔥 Run cleanup only every few seconds (performance optimization)
+    if now - _last_cleanup < CLEANUP_INTERVAL:
+        return
+
+    expired = [n for n, t in used_nonces.items() if now - t > VALIDITY_SECONDS]
+
+    for n in expired:
+        del used_nonces[n]
+
+    _last_cleanup = now
+
+    if expired:
+        print(f"🧹 Cleaned {len(expired)} expired nonces")
 
 
 def verify_request(command, timestamp, device_id, signature, nonce):
@@ -45,22 +70,15 @@ def verify_request(command, timestamp, device_id, signature, nonce):
         print("❌ EXPIRED (>120s)")
         return False, "expired (over 120s)"
 
-    # 🔁 NONCE CHECK
-    now = time.time()
+    # 🧹 CLEAN OLD NONCES (OPTIMIZED)
+    cleanup_nonces()
 
-    # cleanup old nonces
-    expired = [n for n, t in used_nonces.items() if now - t > VALIDITY_SECONDS]
-    for n in expired:
-        del used_nonces[n]
-
+    # 🔁 NONCE REPLAY CHECK
     if nonce in used_nonces:
         print("❌ REPLAY ATTACK (NONCE USED)")
         return False, "replay detected"
 
-    # store nonce
-    used_nonces[nonce] = now
-
-    # 🔐 SIGNATURE CHECK
+    # 🔐 SIGNATURE CHECK (BEFORE STORING NONCE)
     expected = generate_signature(command, timestamp, device_id, nonce)
 
     print(f"SIG (expected): {expected}")
@@ -68,6 +86,9 @@ def verify_request(command, timestamp, device_id, signature, nonce):
     if not hmac.compare_digest(signature, expected):
         print("❌ SIGNATURE MISMATCH")
         return False, "invalid signature"
+
+    # ✅ STORE NONCE ONLY AFTER FULL VALIDATION
+    used_nonces[nonce] = time.time()
 
     print("✅ VALID REQUEST")
     print("🔐 ==========================\n")
