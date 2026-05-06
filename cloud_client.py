@@ -1,13 +1,8 @@
-# ==============================
-# FILE: cloud_client.py (SECURED)
-# ==============================
-
 import asyncio
 import websockets
 import json
 import threading
 
-# ✅ IMPORT SECURITY
 from network.security import verify_request
 
 DEVICE_ID = "160c02a2018e7132"
@@ -69,10 +64,11 @@ class CloudClient:
         action = data.get("action")
         ts = data.get("ts")
         sig = data.get("sig")
+        nonce = data.get("nonce")  # ✅ NEW
 
         print(f"📩 Command received (CLOUD): {action}")
 
-        valid, msg = verify_request(action, ts, DEVICE_ID, sig)
+        valid, msg = verify_request(action, ts, DEVICE_ID, sig, nonce)
 
         if not valid:
             print(f"❌ CLOUD REJECTED: {msg}")

@@ -1,17 +1,11 @@
-# ==============================
-# FILE: network/local_server.py (SECURED)
-# ==============================
-
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 import threading
 import time
 import logging
 
-# ✅ IMPORT SECURITY
 from network.security import verify_request
 
-# 🔥 CLEAN LOGS
 logging.getLogger("uvicorn.access").disabled = True
 
 HOST = "0.0.0.0"
@@ -45,7 +39,8 @@ class LocalServer:
                     params.get("cmd"),
                     params.get("ts"),
                     params.get("device"),
-                    params.get("sig")
+                    params.get("sig"),
+                    params.get("nonce")  # ✅ NEW
                 )
 
                 if not valid:
@@ -69,7 +64,8 @@ class LocalServer:
                     params.get("cmd"),
                     params.get("ts"),
                     params.get("device"),
-                    params.get("sig")
+                    params.get("sig"),
+                    params.get("nonce")  # ✅ NEW
                 )
 
                 if not valid:

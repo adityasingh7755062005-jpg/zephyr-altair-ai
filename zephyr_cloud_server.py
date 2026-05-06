@@ -11,7 +11,6 @@ from fastapi.staticfiles import StaticFiles
 import firebase_admin
 from firebase_admin import credentials, messaging
 
-# ✅ IMPORT SECURITY
 from network.security import verify_request
 
 app = FastAPI()
@@ -72,10 +71,11 @@ async def ws(ws: WebSocket):
                 action = msg.get("action")
                 ts = msg.get("ts")
                 sig = msg.get("sig")
+                nonce = msg.get("nonce")  # ✅ NEW
 
                 print(f"📩 CLOUD CMD → {target} : {action}")
 
-                valid, reason = verify_request(action, ts, target, sig)
+                valid, reason = verify_request(action, ts, target, sig, nonce)
 
                 if not valid:
                     print(f"❌ CLOUD REJECTED: {reason}")
@@ -86,7 +86,8 @@ async def ws(ws: WebSocket):
                         "type": "command",
                         "action": action,
                         "ts": ts,
-                        "sig": sig
+                        "sig": sig,
+                        "nonce": nonce
                     }))
                     print("✅ Command forwarded")
                 else:
