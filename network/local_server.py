@@ -1,5 +1,5 @@
 # ==============================
-# FILE: network/local_server.py (CLEAN - NO TOKEN + IP PRINT)
+# FILE: network/local_server.py (SECURED)
 # ==============================
 
 from fastapi import FastAPI, Request
@@ -7,6 +7,9 @@ from fastapi.responses import JSONResponse
 import threading
 import time
 import logging
+
+# ✅ IMPORT SECURITY
+from network.security import verify_request
 
 # 🔥 CLEAN LOGS
 logging.getLogger("uvicorn.access").disabled = True
@@ -36,9 +39,23 @@ class LocalServer:
         @self.app.api_route("/lock", methods=["GET", "POST"])
         async def lock(request: Request):
             try:
-                print("📥 LOCAL LOCK")
+                params = dict(request.query_params)
+
+                valid, msg = verify_request(
+                    params.get("cmd"),
+                    params.get("ts"),
+                    params.get("device"),
+                    params.get("sig")
+                )
+
+                if not valid:
+                    print(f"❌ REJECTED LOCK: {msg}")
+                    return JSONResponse(status_code=403, content={"error": msg})
+
+                print("📥 LOCAL LOCK (VALID)")
                 self.core.lock()
                 return {"status": "locked"}
+
             except Exception as e:
                 return JSONResponse(status_code=500, content={"error": str(e)})
 
@@ -46,9 +63,23 @@ class LocalServer:
         @self.app.api_route("/unlock", methods=["GET", "POST"])
         async def unlock(request: Request):
             try:
-                print("📥 LOCAL UNLOCK")
+                params = dict(request.query_params)
+
+                valid, msg = verify_request(
+                    params.get("cmd"),
+                    params.get("ts"),
+                    params.get("device"),
+                    params.get("sig")
+                )
+
+                if not valid:
+                    print(f"❌ REJECTED UNLOCK: {msg}")
+                    return JSONResponse(status_code=403, content={"error": msg})
+
+                print("📥 LOCAL UNLOCK (VALID)")
                 self.core.unlock()
                 return {"status": "unlocked"}
+
             except Exception as e:
                 return JSONResponse(status_code=500, content={"error": str(e)})
 
@@ -56,7 +87,6 @@ class LocalServer:
         import uvicorn
         import socket
 
-        # 🔥 Get correct local IP (works reliably)
         def get_local_ip():
             s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             try:

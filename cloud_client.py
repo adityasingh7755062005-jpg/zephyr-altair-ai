@@ -1,11 +1,14 @@
 # ==============================
-# FILE: cloud_client.py (CLEAN - NO TOKEN)
+# FILE: cloud_client.py (SECURED)
 # ==============================
 
 import asyncio
 import websockets
 import json
 import threading
+
+# ✅ IMPORT SECURITY
+from network.security import verify_request
 
 DEVICE_ID = "160c02a2018e7132"
 CLOUD_URL = "wss://zephyr-altair-ai-server.onrender.com/ws"
@@ -64,11 +67,15 @@ class CloudClient:
             return
 
         action = data.get("action")
+        ts = data.get("ts")
+        sig = data.get("sig")
 
         print(f"📩 Command received (CLOUD): {action}")
 
-        if not action:
-            print("❌ Invalid command")
+        valid, msg = verify_request(action, ts, DEVICE_ID, sig)
+
+        if not valid:
+            print(f"❌ CLOUD REJECTED: {msg}")
             return
 
         if action == "lock":
