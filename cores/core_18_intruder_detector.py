@@ -46,6 +46,8 @@ class IntruderDetector:
         if not self.lock.acquire(blocking=False):
             return
 
+        cam = None
+
         try:
             cam = cv2.VideoCapture(0)
 
@@ -55,34 +57,36 @@ class IntruderDetector:
             ret, frame = cam.read()
 
             if ret:
-                file = f"intruders/{datetime.now().strftime('%H%M%S')}.jpg"
-                cv2.imwrite(file, frame)
+                filename = datetime.now().strftime("%Y%m%d_%H%M%S")
+                file_path = f"intruders/{filename}.jpg"
 
-                threading.Thread(
-                    target=self.upload,
-                    args=(file,),
-                    daemon=True
-                ).start()
+                success = cv2.imwrite(file_path, frame)
 
-            cam.release()
+                if success and os.path.exists(file_path):
+                    threading.Thread(
+                        target=self.upload,
+                        args=(file_path,),
+                        daemon=True
+                    ).start()
 
         finally:
+            if cam is not None:
+                cam.release()
             self.lock.release()
 
-    def upload(self, file):
+    def upload(self, file_path):
 
         for _ in range(3):
             try:
-                with open(file, "rb") as f:
-
-                    res = requests.post(
+                with open(file_path, "rb") as f:
+                    response = requests.post(
                         CLOUD_UPLOAD_URL,
                         files={"file": f},
                         data={"device_id": DEVICE_ID},
                         timeout=10
                     )
 
-                    if res.status_code == 200:
+                    if response.status_code == 200:
                         return
 
             except:

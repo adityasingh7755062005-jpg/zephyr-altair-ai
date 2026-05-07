@@ -1,5 +1,5 @@
 # ==============================
-# FILE 5: zephyr_cloud_server.py (SECURED)
+# FILE 5: zephyr_cloud_server.py (FULL FIXED)
 # ==============================
 
 import json
@@ -15,6 +15,7 @@ from network.security import verify_request
 
 app = FastAPI()
 
+# 🔥 Firebase Init
 if not firebase_admin._apps:
     try:
         cred = credentials.Certificate("firebase_key.json")
@@ -32,6 +33,9 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 app.mount("/intruders", StaticFiles(directory=UPLOAD_DIR), name="intruders")
 
 
+# ==============================
+# FCM SEND
+# ==============================
 def send_fcm(token, title, body, data):
     try:
         message = messaging.Message(
@@ -45,6 +49,9 @@ def send_fcm(token, title, body, data):
         print("❌ FCM error:", e)
 
 
+# ==============================
+# REGISTER FCM
+# ==============================
 @app.post("/register_fcm")
 async def register_fcm(data: dict):
     fcm_tokens[data["device_id"]] = data["fcm_token"]
@@ -52,6 +59,53 @@ async def register_fcm(data: dict):
     return {"status": "ok"}
 
 
+# ==============================
+# 🚨 INTRUDER UPLOAD (FIXED)
+# ==============================
+@app.post("/upload_intruder")
+async def upload_intruder(file: UploadFile = File(...), device_id: str = ""):
+
+    try:
+        # ✅ UNIQUE FILE NAME
+        filename = f"{device_id}_{int(time.time())}.jpg"
+        path = os.path.join(UPLOAD_DIR, filename)
+
+        # ✅ SAVE FILE
+        with open(path, "wb") as f:
+            shutil.copyfileobj(file.file, f)
+
+        # ✅ PUBLIC URL (IMPORTANT)
+        url = f"https://zephyr-altair-ai-server.onrender.com/intruders/{filename}"
+
+        print(f"📸 Intruder uploaded: {device_id}")
+        print(f"🌐 URL: {url}")
+
+        # ✅ SEND FCM
+        token = fcm_tokens.get(device_id)
+
+        if token:
+            send_fcm(
+                token,
+                "🚨 Intruder Alert",
+                "Tap to view image",
+                {
+                    "type": "intruder",
+                    "image_url": url
+                }
+            )
+        else:
+            print("❌ No FCM token found")
+
+        return {"status": "ok", "url": url}
+
+    except Exception as e:
+        print("❌ Upload error:", e)
+        return {"status": "error", "message": str(e)}
+
+
+# ==============================
+# WEBSOCKET
+# ==============================
 @app.websocket("/ws")
 async def ws(ws: WebSocket):
     await ws.accept()
@@ -71,7 +125,7 @@ async def ws(ws: WebSocket):
                 action = msg.get("action")
                 ts = msg.get("ts")
                 sig = msg.get("sig")
-                nonce = msg.get("nonce")  # ✅ NEW
+                nonce = msg.get("nonce")
 
                 print(f"📩 CLOUD CMD → {target} : {action}")
 
