@@ -6,8 +6,18 @@ import json
 import os
 import time
 import shutil
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File
+
+from fastapi import (
+    FastAPI,
+    WebSocket,
+    WebSocketDisconnect,
+    UploadFile,
+    File,
+    Form
+)
+
 from fastapi.staticfiles import StaticFiles
+
 import firebase_admin
 from firebase_admin import credentials, messaging
 
@@ -15,42 +25,70 @@ from network.security import verify_request
 
 app = FastAPI()
 
-# 🔥 Firebase Init (ENV FIXED)
+
+# ==============================
+# 🔥 FIREBASE INIT
+# ==============================
 if not firebase_admin._apps:
+
     try:
         firebase_json = os.environ.get("FIREBASE_KEY_JSON")
 
         if firebase_json:
+
             cred_dict = json.loads(firebase_json)
+
             cred = credentials.Certificate(cred_dict)
+
             firebase_admin.initialize_app(cred)
+
             print("✅ Firebase Ready From ENV")
+
         else:
             print("❌ FIREBASE_KEY_JSON missing")
 
     except Exception as e:
         print("❌ Firebase error:", e)
 
+
+# ==============================
+# MEMORY
+# ==============================
 clients = {}
+
 fcm_tokens = {}
 
+
+# ==============================
+# STORAGE
+# ==============================
 UPLOAD_DIR = "intruders"
+
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-app.mount("/intruders", StaticFiles(directory=UPLOAD_DIR), name="intruders")
+app.mount(
+    "/intruders",
+    StaticFiles(directory=UPLOAD_DIR),
+    name="intruders"
+)
 
 
 # ==============================
 # FCM SEND
 # ==============================
 def send_fcm(token, title, body, data):
+
     try:
+
         message = messaging.Message(
+
             notification=messaging.Notification(
                 title=title,
                 body=body
             ),
+
             data=data,
+
             token=token
         )
 
@@ -70,23 +108,37 @@ def send_fcm(token, title, body, data):
 async def register_fcm(data: dict):
 
     try:
-        device_id = data.get("device_id", "")
-        fcm_token = data.get("fcm_token", "")
 
-        if not device_id or not fcm_token:
+        device_id = data.get("device_id", "").strip()
+
+        fcm_token = data.get("fcm_token", "").strip()
+
+        if not device_id:
             return {
                 "status": "error",
-                "message": "missing fields"
+                "message": "device_id missing"
+            }
+
+        if not fcm_token:
+            return {
+                "status": "error",
+                "message": "fcm_token missing"
             }
 
         fcm_tokens[device_id] = fcm_token
 
         print(f"📱 FCM registered: {device_id}")
-        print(f"🔑 TOKEN: {fcm_token[:30]}...")
+        print(f"🔑 TOKEN: {fcm_token[:35]}...")
 
-        return {"status": "ok"}
+        print("📦 ALL TOKENS:")
+        print(fcm_tokens)
+
+        return {
+            "status": "ok"
+        }
 
     except Exception as e:
+
         print("❌ Register FCM error:", e)
 
         return {
@@ -96,15 +148,25 @@ async def register_fcm(data: dict):
 
 
 # ==============================
-# 🚨 INTRUDER UPLOAD (FULL FIXED)
+# 🚨 INTRUDER UPLOAD
 # ==============================
 @app.post("/upload_intruder")
 async def upload_intruder(
+
     file: UploadFile = File(...),
-    device_id: str = ""
+
+    # ✅ IMPORTANT FIX
+    device_id: str = Form(...)
+
 ):
 
     try:
+
+        device_id = device_id.strip()
+
+        print("📥 Upload request received")
+        print(f"📱 Device ID: {device_id}")
+
         # ✅ UNIQUE FILE NAME
         filename = f"{device_id}_{int(time.time())}.jpg"
 
@@ -115,21 +177,31 @@ async def upload_intruder(
             shutil.copyfileobj(file.file, f)
 
         # ✅ PUBLIC URL
-        url = f"https://zephyr-altair-ai-server.onrender.com/intruders/{filename}"
+        url = (
+            f"https://zephyr-altair-ai-server.onrender.com"
+            f"/intruders/{filename}"
+        )
 
-        print("📸 Intruder uploaded:")
+        print("📸 Intruder uploaded")
         print(f"🌐 URL: {url}")
 
-        # ✅ GET TOKEN
+        # ✅ FIND TOKEN
         token = fcm_tokens.get(device_id)
+
+        print("🔎 Searching token...")
+        print(f"📱 Requested Device: {device_id}")
 
         if token:
 
-            # ✅ SEND FCM
+            print("✅ Token found")
+
             send_fcm(
                 token,
+
                 "🚨 Intruder Alert",
+
                 "Tap to view image",
+
                 {
                     "type": "intruder",
                     "image_url": url,
@@ -140,8 +212,12 @@ async def upload_intruder(
             )
 
         else:
+
             print("❌ No FCM token found")
             print(f"📱 Device ID: {device_id}")
+
+            print("📦 AVAILABLE TOKENS:")
+            print(fcm_tokens)
 
         return {
             "status": "ok",
@@ -149,6 +225,7 @@ async def upload_intruder(
         }
 
     except Exception as e:
+
         print("❌ Upload error:", e)
 
         return {
@@ -168,10 +245,14 @@ async def ws(ws: WebSocket):
     device_id = None
 
     try:
+
         while True:
 
             msg = json.loads(await ws.receive_text())
 
+            # ==============================
+            # REGISTER DEVICE
+            # ==============================
             if msg.get("type") == "register":
 
                 device_id = msg.get("device_id")
@@ -180,6 +261,9 @@ async def ws(ws: WebSocket):
 
                 print(f"✅ Device connected: {device_id}")
 
+            # ==============================
+            # COMMAND
+            # ==============================
             elif msg.get("type") == "command":
 
                 target = msg.get("target")
@@ -199,22 +283,30 @@ async def ws(ws: WebSocket):
                 )
 
                 if not valid:
+
                     print(f"❌ CLOUD REJECTED: {reason}")
+
                     continue
 
                 if target in clients:
 
-                    await clients[target].send_text(json.dumps({
-                        "type": "command",
-                        "action": action,
-                        "ts": ts,
-                        "sig": sig,
-                        "nonce": nonce
-                    }))
+                    await clients[target].send_text(
+
+                        json.dumps({
+
+                            "type": "command",
+                            "action": action,
+                            "ts": ts,
+                            "sig": sig,
+                            "nonce": nonce
+
+                        })
+                    )
 
                     print("✅ Command forwarded")
 
                 else:
+
                     print("❌ Target not connected")
 
     except WebSocketDisconnect:
