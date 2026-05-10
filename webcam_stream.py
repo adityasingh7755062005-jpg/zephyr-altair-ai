@@ -91,6 +91,8 @@ async def cloud_connection_loop():
 
     while True:
 
+        ws = None
+
         try:
 
             print("\n☁️ Connecting To Cloud...")
@@ -134,13 +136,10 @@ async def cloud_connection_loop():
             print("☁️ Cloud Connected")
 
             # ==============================
-            # KEEP ALIVE LOOP
+            # KEEP ALIVE
             # ==============================
 
             while True:
-
-                if ws.closed:
-                    break
 
                 try:
 
@@ -150,7 +149,7 @@ async def cloud_connection_loop():
                         })
                     )
 
-                except:
+                except Exception:
                     break
 
                 await asyncio.sleep(15)
@@ -170,15 +169,16 @@ async def cloud_connection_loop():
 
             try:
 
-                if cloud_ws:
-                    await cloud_ws.close()
+                if ws:
+
+                    await ws.close()
 
             except:
                 pass
 
             cloud_ws = None
 
-            print("☁️ Cloud Offline")
+            print("\n☁️ Cloud Offline")
 
             await asyncio.sleep(5)
 
@@ -297,7 +297,7 @@ async def stream_camera():
 
                     await ws.send(payload)
 
-                except:
+                except Exception:
 
                     dead_clients.add(ws)
 
@@ -312,7 +312,7 @@ async def stream_camera():
             if (
                 cloud_connected
                 and
-                cloud_ws
+                cloud_ws is not None
             ):
 
                 try:
@@ -321,9 +321,13 @@ async def stream_camera():
                         payload
                     )
 
-                except:
+                except Exception:
 
                     cloud_connected = False
+
+                    print(
+                        "\n❌ Cloud Send Failed"
+                    )
 
             # ==============================
             # FPS COUNTER

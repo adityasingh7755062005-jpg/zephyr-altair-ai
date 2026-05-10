@@ -1,6 +1,7 @@
 # ==============================
 # FILE 5: zephyr_cloud_server.py
 # FULL CLOUD CAMERA VERSION
+# FULL STABLE + TRUSTED DEVICE VERSION
 # ==============================
 
 import json
@@ -27,8 +28,15 @@ from network.security import verify_request
 app = FastAPI()
 
 # ==============================
+# ✅ TRUSTED DEVICE
+# ==============================
+
+TRUSTED_DEVICE_ID = "160c02a2018e7132"
+
+# ==============================
 # 🔥 FIREBASE INIT
 # ==============================
+
 if not firebase_admin._apps:
 
     try:
@@ -105,6 +113,17 @@ app.mount(
 )
 
 # ==============================
+# TRUST CHECK
+# ==============================
+
+def is_trusted_device(device_id):
+
+    return (
+        device_id ==
+        TRUSTED_DEVICE_ID
+    )
+
+# ==============================
 # FCM SEND
 # ==============================
 
@@ -162,6 +181,24 @@ async def register_fcm(
             "fcm_token",
             ""
         ).strip()
+
+        # ==============================
+        # TRUST CHECK
+        # ==============================
+
+        if not is_trusted_device(
+            device_id
+        ):
+
+            print(
+                f"❌ Untrusted FCM Device: "
+                f"{device_id}"
+            )
+
+            return {
+                "status": "error",
+                "message": "untrusted device"
+            }
 
         if not device_id:
 
@@ -223,6 +260,24 @@ async def upload_intruder(
     try:
 
         device_id = device_id.strip()
+
+        # ==============================
+        # TRUST CHECK
+        # ==============================
+
+        if not is_trusted_device(
+            device_id
+        ):
+
+            print(
+                f"❌ Untrusted Upload Device: "
+                f"{device_id}"
+            )
+
+            return {
+                "status": "error",
+                "message": "untrusted device"
+            }
 
         print(
             "📥 Upload request received"
@@ -352,8 +407,26 @@ async def ws(ws: WebSocket):
             if msg_type == "register":
 
                 device_id = msg.get(
-                    "device_id"
-                )
+                    "device_id",
+                    ""
+                ).strip()
+
+                # ==============================
+                # TRUST CHECK
+                # ==============================
+
+                if not is_trusted_device(
+                    device_id
+                ):
+
+                    print(
+                        f"❌ Untrusted Device Blocked: "
+                        f"{device_id}"
+                    )
+
+                    await ws.close()
+
+                    return
 
                 clients[device_id] = ws
 
@@ -371,8 +444,26 @@ async def ws(ws: WebSocket):
             elif msg_type == "camera_auth":
 
                 device_id = msg.get(
-                    "device_id"
-                )
+                    "device_id",
+                    ""
+                ).strip()
+
+                # ==============================
+                # TRUST CHECK
+                # ==============================
+
+                if not is_trusted_device(
+                    device_id
+                ):
+
+                    print(
+                        f"❌ Untrusted Camera Blocked: "
+                        f"{device_id}"
+                    )
+
+                    await ws.close()
+
+                    return
 
                 role = "camera"
 
@@ -396,8 +487,26 @@ async def ws(ws: WebSocket):
             elif msg_type == "view_camera":
 
                 viewer_target = msg.get(
-                    "target_device"
-                )
+                    "target_device",
+                    ""
+                ).strip()
+
+                # ==============================
+                # TRUST CHECK
+                # ==============================
+
+                if not is_trusted_device(
+                    viewer_target
+                ):
+
+                    print(
+                        f"❌ Untrusted Viewer Target: "
+                        f"{viewer_target}"
+                    )
+
+                    await ws.close()
+
+                    return
 
                 role = "viewer"
 
@@ -428,8 +537,19 @@ async def ws(ws: WebSocket):
             elif msg_type == "camera_frame":
 
                 source_device = msg.get(
-                    "device_id"
-                )
+                    "device_id",
+                    ""
+                ).strip()
+
+                # ==============================
+                # TRUST CHECK
+                # ==============================
+
+                if not is_trusted_device(
+                    source_device
+                ):
+
+                    continue
 
                 viewers = camera_viewers.get(
                     source_device,
@@ -457,6 +577,24 @@ async def ws(ws: WebSocket):
                 )
 
             # ==============================
+            # PING
+            # ==============================
+
+            elif msg_type == "ping":
+
+                try:
+
+                    await ws.send_text(
+
+                        json.dumps({
+                            "type": "pong"
+                        })
+                    )
+
+                except:
+                    pass
+
+            # ==============================
             # COMMAND SYSTEM
             # ==============================
 
@@ -481,6 +619,21 @@ async def ws(ws: WebSocket):
                 nonce = msg.get(
                     "nonce"
                 )
+
+                # ==============================
+                # TRUST CHECK
+                # ==============================
+
+                if not is_trusted_device(
+                    target
+                ):
+
+                    print(
+                        f"❌ Untrusted Command Target: "
+                        f"{target}"
+                    )
+
+                    continue
 
                 print(
                     f"📩 CLOUD CMD → "
@@ -511,25 +664,33 @@ async def ws(ws: WebSocket):
 
                 if target in clients:
 
-                    await clients[target].send_text(
+                    try:
 
-                        json.dumps({
+                        await clients[target].send_text(
 
-                            "type": "command",
+                            json.dumps({
 
-                            "action": action,
+                                "type": "command",
 
-                            "ts": ts,
+                                "action": action,
 
-                            "sig": sig,
+                                "ts": ts,
 
-                            "nonce": nonce
-                        })
-                    )
+                                "sig": sig,
 
-                    print(
-                        "✅ Command forwarded"
-                    )
+                                "nonce": nonce
+                            })
+                        )
+
+                        print(
+                            "✅ Command forwarded"
+                        )
+
+                    except Exception as e:
+
+                        print(
+                            f"❌ Forward failed: {e}"
+                        )
 
                 else:
 
@@ -545,13 +706,23 @@ async def ws(ws: WebSocket):
             f"{device_id}"
         )
 
+    except Exception as e:
+
+        print(
+            f"\n❌ WebSocket Error: {e}"
+        )
+
     finally:
 
         # ==============================
         # REMOVE NORMAL CLIENT
         # ==============================
 
-        if device_id in clients:
+        if (
+            device_id
+            and
+            device_id in clients
+        ):
 
             del clients[device_id]
 
@@ -559,7 +730,11 @@ async def ws(ws: WebSocket):
         # REMOVE CAMERA
         # ==============================
 
-        if device_id in camera_streamers:
+        if (
+            device_id
+            and
+            device_id in camera_streamers
+        ):
 
             del camera_streamers[
                 device_id
@@ -573,7 +748,11 @@ async def ws(ws: WebSocket):
         # REMOVE VIEWER
         # ==============================
 
-        if viewer_target in camera_viewers:
+        if (
+            viewer_target
+            and
+            viewer_target in camera_viewers
+        ):
 
             camera_viewers[
                 viewer_target
@@ -582,3 +761,8 @@ async def ws(ws: WebSocket):
             print(
                 "👁️ Viewer Removed"
             )
+
+        print(
+            f"📊 Devices: {len(clients)} | "
+            f"Cameras: {len(camera_streamers)}"
+        )
