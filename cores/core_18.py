@@ -2,6 +2,7 @@
 # FILE: cores/core_18.py
 # FULL LIVE CAMERA WIRED VERSION
 # FINAL STABLE BUILD
+# FIXED CLOUD CAMERA START VERSION
 # ==============================
 
 from cores.core_18_security_state import SecurityState
@@ -92,11 +93,29 @@ class Core18:
 
         self.login_watcher.arm()
 
+        # ==============================
+        # AUTO START CAMERA ENGINE
+        # ==============================
+
+        camera_started = (
+            self.start_live_camera()
+        )
+
+        # ==============================
+        # STATUS
+        # ==============================
+
         print("✅ Core 18 initialized successfully")
 
         print("🔐 Security system active")
 
-        print("📷 Live camera engine ready")
+        if camera_started:
+
+            print("📷 Live camera engine running")
+
+        else:
+
+            print("❌ Live camera failed to start")
 
         print("⏳ Waiting for device connection...")
 
@@ -303,11 +322,19 @@ class Core18:
                     "[Core 18] 🚀 Starting live camera..."
                 )
 
+                print(
+                    f"[Core 18] 📂 Path: {webcam_path}"
+                )
+
                 # ==============================
                 # PYTHON EXECUTABLE
                 # ==============================
 
                 python_exe = sys.executable
+
+                print(
+                    f"[Core 18] 🐍 Python: {python_exe}"
+                )
 
                 # ==============================
                 # WINDOWS FLAGS
@@ -334,6 +361,9 @@ class Core18:
 
                     cwd=project_root,
 
+                    stdout=None,
+                    stderr=None,
+
                     creationflags=creation_flags
                 )
 
@@ -341,7 +371,7 @@ class Core18:
                 # WAIT
                 # ==============================
 
-                time.sleep(2)
+                time.sleep(5)
 
                 # ==============================
                 # VERIFY
@@ -359,10 +389,29 @@ class Core18:
                         "[Core 18] ✅ Live camera started"
                     )
 
+                    print(
+                        f"[Core 18] 📷 PID: {self.camera_process.pid}"
+                    )
+
                     return True
 
+                # ==============================
+                # PROCESS CRASHED
+                # ==============================
+
+                exit_code = None
+
+                try:
+
+                    exit_code = (
+                        self.camera_process.poll()
+                    )
+
+                except:
+                    pass
+
                 print(
-                    "[Core 18] ❌ Camera process crashed"
+                    f"[Core 18] ❌ Camera process crashed | Exit: {exit_code}"
                 )
 
                 self.camera_running = False
