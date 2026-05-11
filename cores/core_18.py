@@ -2,7 +2,7 @@
 # FILE: cores/core_18.py
 # FULL LIVE CAMERA WIRED VERSION
 # FINAL STABLE BUILD
-# FIXED CLOUD CAMERA START VERSION
+# MANUAL CAMERA START VERSION
 # ==============================
 
 from cores.core_18_security_state import SecurityState
@@ -94,14 +94,6 @@ class Core18:
         self.login_watcher.arm()
 
         # ==============================
-        # AUTO START CAMERA ENGINE
-        # ==============================
-
-        camera_started = (
-            self.start_live_camera()
-        )
-
-        # ==============================
         # STATUS
         # ==============================
 
@@ -109,13 +101,7 @@ class Core18:
 
         print("🔐 Security system active")
 
-        if camera_started:
-
-            print("📷 Live camera engine running")
-
-        else:
-
-            print("❌ Live camera failed to start")
+        print("📷 Live camera engine ready")
 
         print("⏳ Waiting for device connection...")
 
@@ -337,15 +323,19 @@ class Core18:
                 )
 
                 # ==============================
-                # WINDOWS FLAGS
+                # NO EXTRA TERMINAL WINDOW
                 # ==============================
 
                 creation_flags = 0
 
+                startupinfo = None
+
                 if os.name == "nt":
 
-                    creation_flags = (
-                        subprocess.CREATE_NEW_CONSOLE
+                    startupinfo = subprocess.STARTUPINFO()
+
+                    startupinfo.dwFlags |= (
+                        subprocess.STARTF_USESHOWWINDOW
                     )
 
                 # ==============================
@@ -364,14 +354,16 @@ class Core18:
                     stdout=None,
                     stderr=None,
 
-                    creationflags=creation_flags
+                    creationflags=creation_flags,
+
+                    startupinfo=startupinfo
                 )
 
                 # ==============================
                 # WAIT
                 # ==============================
 
-                time.sleep(5)
+                time.sleep(3)
 
                 # ==============================
                 # VERIFY
