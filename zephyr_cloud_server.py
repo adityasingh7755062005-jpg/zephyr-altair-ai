@@ -2,6 +2,7 @@
 # FILE 5: zephyr_cloud_server.py
 # FULL CLOUD CAMERA VERSION
 # FULL STABLE + TRUSTED DEVICE VERSION
+# FIXED CLOUD CAMERA RELAY
 # ==============================
 
 import json
@@ -80,8 +81,10 @@ if not firebase_admin._apps:
 # MEMORY
 # ==============================
 
+# ✅ MOBILE CLIENTS
 clients = {}
 
+# ✅ FCM TOKENS
 fcm_tokens = {}
 
 # ✅ CAMERA STREAMERS
@@ -182,10 +185,6 @@ async def register_fcm(
             ""
         ).strip()
 
-        # ==============================
-        # TRUST CHECK
-        # ==============================
-
         if not is_trusted_device(
             device_id
         ):
@@ -260,10 +259,6 @@ async def upload_intruder(
     try:
 
         device_id = device_id.strip()
-
-        # ==============================
-        # TRUST CHECK
-        # ==============================
 
         if not is_trusted_device(
             device_id
@@ -385,14 +380,14 @@ async def ws(ws: WebSocket):
     await ws.accept()
 
     device_id = None
-
     viewer_target = None
-
     role = None
+
+    connection_alive = True
 
     try:
 
-        while True:
+        while connection_alive:
 
             raw = await ws.receive_text()
 
@@ -401,7 +396,7 @@ async def ws(ws: WebSocket):
             msg_type = msg.get("type")
 
             # ==============================
-            # NORMAL DEVICE REGISTER
+            # MOBILE DEVICE REGISTER
             # ==============================
 
             if msg_type == "register":
@@ -410,10 +405,6 @@ async def ws(ws: WebSocket):
                     "device_id",
                     ""
                 ).strip()
-
-                # ==============================
-                # TRUST CHECK
-                # ==============================
 
                 if not is_trusted_device(
                     device_id
@@ -428,12 +419,16 @@ async def ws(ws: WebSocket):
 
                     return
 
-                clients[device_id] = ws
+                role = "mobile"
 
-                role = "device"
+                # ✅ FIXED
+                clients[
+                    f"mobile_{device_id}"
+                ] = ws
 
+                print("")
                 print(
-                    f"✅ Device connected: "
+                    f"📱 Mobile Connected: "
                     f"{device_id}"
                 )
 
@@ -447,10 +442,6 @@ async def ws(ws: WebSocket):
                     "device_id",
                     ""
                 ).strip()
-
-                # ==============================
-                # TRUST CHECK
-                # ==============================
 
                 if not is_trusted_device(
                     device_id
@@ -491,10 +482,6 @@ async def ws(ws: WebSocket):
                     ""
                 ).strip()
 
-                # ==============================
-                # TRUST CHECK
-                # ==============================
-
                 if not is_trusted_device(
                     viewer_target
                 ):
@@ -522,12 +509,17 @@ async def ws(ws: WebSocket):
 
                 print("")
                 print(
-                    "👁️ Camera Viewer Connected"
+                    "👁️ Viewer Connected"
                 )
 
                 print(
                     f"🎯 Target: "
                     f"{viewer_target}"
+                )
+
+                print(
+                    f"👥 Total Viewers: "
+                    f"{len(camera_viewers[viewer_target])}"
                 )
 
             # ==============================
@@ -541,10 +533,6 @@ async def ws(ws: WebSocket):
                     ""
                 ).strip()
 
-                # ==============================
-                # TRUST CHECK
-                # ==============================
-
                 if not is_trusted_device(
                     source_device
                 ):
@@ -556,9 +544,12 @@ async def ws(ws: WebSocket):
                     set()
                 )
 
+                if not viewers:
+                    continue
+
                 dead_viewers = set()
 
-                for viewer_ws in viewers:
+                for viewer_ws in list(viewers):
 
                     try:
 
@@ -566,7 +557,11 @@ async def ws(ws: WebSocket):
                             raw
                         )
 
-                    except Exception:
+                    except Exception as e:
+
+                        print(
+                            f"❌ Viewer Send Failed: {e}"
+                        )
 
                         dead_viewers.add(
                             viewer_ws
@@ -592,7 +587,8 @@ async def ws(ws: WebSocket):
                     )
 
                 except:
-                    pass
+
+                    connection_alive = False
 
             # ==============================
             # COMMAND SYSTEM
@@ -619,10 +615,6 @@ async def ws(ws: WebSocket):
                 nonce = msg.get(
                     "nonce"
                 )
-
-                # ==============================
-                # TRUST CHECK
-                # ==============================
 
                 if not is_trusted_device(
                     target
@@ -662,11 +654,15 @@ async def ws(ws: WebSocket):
 
                     continue
 
-                if target in clients:
+                mobile_ws = clients.get(
+                    f"mobile_{target}"
+                )
+
+                if mobile_ws:
 
                     try:
 
-                        await clients[target].send_text(
+                        await mobile_ws.send_text(
 
                             json.dumps({
 
@@ -715,16 +711,18 @@ async def ws(ws: WebSocket):
     finally:
 
         # ==============================
-        # REMOVE NORMAL CLIENT
+        # REMOVE MOBILE
         # ==============================
 
         if (
             device_id
             and
-            device_id in clients
+            f"mobile_{device_id}" in clients
         ):
 
-            del clients[device_id]
+            del clients[
+                f"mobile_{device_id}"
+            ]
 
         # ==============================
         # REMOVE CAMERA
@@ -758,11 +756,21 @@ async def ws(ws: WebSocket):
                 viewer_target
             ].discard(ws)
 
+            if not camera_viewers[
+                viewer_target
+            ]:
+
+                del camera_viewers[
+                    viewer_target
+                ]
+
             print(
                 "👁️ Viewer Removed"
             )
 
+        print("")
         print(
-            f"📊 Devices: {len(clients)} | "
-            f"Cameras: {len(camera_streamers)}"
+            f"📊 Mobiles: {len(clients)} | "
+            f"Cameras: {len(camera_streamers)} | "
+            f"Viewer Groups: {len(camera_viewers)}"
         )
