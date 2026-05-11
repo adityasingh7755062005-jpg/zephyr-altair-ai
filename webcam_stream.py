@@ -2,6 +2,7 @@
 # FILE: webcam_stream.py
 # ZEPHYR LIVE CAMERA ENGINE
 # FULL FIXED CLOUD VERSION
+# FINAL STABLE BUILD
 # ==============================
 
 import cv2
@@ -101,10 +102,26 @@ async def cloud_receiver(ws):
 
                     pass
 
+                elif msg_type == "viewer_connected":
+
+                    print(
+                        "\n👁️ Camera Viewer Connected"
+                    )
+
+                elif msg_type == "viewer_disconnected":
+
+                    print(
+                        "\n📴 Camera Viewer Disconnected"
+                    )
+
             except:
                 pass
 
-    except Exception:
+    except Exception as e:
+
+        print(
+            f"\n❌ Cloud Receiver Error: {e}"
+        )
 
         cloud_connected = False
 
@@ -121,12 +138,19 @@ async def cloud_ping_loop(ws):
         try:
 
             await ws.send(json.dumps({
-                "type": "ping"
+                "type": "ping",
+                "device_id": DEVICE_ID,
+                "timestamp": int(time.time())
             }))
 
-        except Exception:
+        except Exception as e:
+
+            print(
+                f"\n❌ Ping Failed: {e}"
+            )
 
             cloud_connected = False
+
             break
 
         await asyncio.sleep(10)
@@ -150,22 +174,21 @@ async def cloud_connection_loop():
 
                 CLOUD_URI,
 
-                ping_interval=None,
-                ping_timeout=None,
+                ping_interval=20,
+
+                ping_timeout=20,
+
+                close_timeout=5,
 
                 max_size=None,
 
-                close_timeout=2
+                max_queue=None
             )
 
             async with cloud_lock:
 
                 cloud_ws = ws
                 cloud_connected = True
-
-            # ==============================
-            # AUTH
-            # ==============================
 
             auth_packet = {
 
@@ -201,11 +224,14 @@ async def cloud_connection_loop():
             )
 
             for task in pending:
+
                 task.cancel()
 
         except Exception as e:
 
-            print(f"\n❌ Cloud Error: {e}")
+            print(
+                f"\n❌ Cloud Error: {e}"
+            )
 
         finally:
 
@@ -216,6 +242,7 @@ async def cloud_connection_loop():
                 try:
 
                     if cloud_ws:
+
                         await cloud_ws.close()
 
                 except:
@@ -249,6 +276,7 @@ async def stream_camera():
             if not success:
 
                 await asyncio.sleep(FRAME_DELAY)
+
                 continue
 
             frame = cv2.resize(
@@ -278,6 +306,7 @@ async def stream_camera():
             )
 
             if not success:
+
                 continue
 
             jpg_as_text = base64.b64encode(
@@ -313,7 +342,7 @@ async def stream_camera():
 
             dead_clients = set()
 
-            for ws in connected_clients:
+            for ws in connected_clients.copy():
 
                 try:
 
@@ -337,7 +366,11 @@ async def stream_camera():
 
                     async with cloud_lock:
 
-                        if cloud_ws:
+                        if (
+                            cloud_ws
+                            and
+                            not cloud_ws.closed
+                        ):
 
                             await cloud_ws.send(
                                 payload
@@ -410,6 +443,7 @@ async def stream_camera():
             )
 
         except asyncio.CancelledError:
+
             break
 
         except Exception as e:
@@ -537,6 +571,7 @@ async def main():
     finally:
 
         stream_task.cancel()
+
         cloud_task.cancel()
 
 # ==============================
@@ -549,12 +584,16 @@ def cleanup():
     print("\n🛑 Closing Camera Engine")
 
     try:
+
         camera.release()
+
     except:
         pass
 
     try:
+
         cv2.destroyAllWindows()
+
     except:
         pass
 

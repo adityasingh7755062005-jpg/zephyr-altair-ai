@@ -3,6 +3,7 @@
 # FULL LIVE CAMERA WIRED VERSION
 # FINAL STABLE BUILD
 # MANUAL CAMERA START VERSION
+# FULL FIXED VERSION
 # ==============================
 
 from cores.core_18_security_state import SecurityState
@@ -323,14 +324,17 @@ class Core18:
                 )
 
                 # ==============================
-                # NO EXTRA TERMINAL WINDOW
+                # WINDOWS HIDDEN PROCESS
                 # ==============================
 
                 creation_flags = 0
-
                 startupinfo = None
 
                 if os.name == "nt":
+
+                    creation_flags = (
+                        subprocess.CREATE_NO_WINDOW
+                    )
 
                     startupinfo = subprocess.STARTUPINFO()
 
@@ -351,8 +355,11 @@ class Core18:
 
                     cwd=project_root,
 
-                    stdout=None,
-                    stderr=None,
+                    stdout=subprocess.DEVNULL,
+
+                    stderr=subprocess.DEVNULL,
+
+                    stdin=subprocess.DEVNULL,
 
                     creationflags=creation_flags,
 
@@ -386,10 +393,6 @@ class Core18:
                     )
 
                     return True
-
-                # ==============================
-                # PROCESS CRASHED
-                # ==============================
 
                 exit_code = None
 
@@ -447,10 +450,6 @@ class Core18:
                 print(
                     "[Core 18] 🛑 Stopping live camera..."
                 )
-
-                # ==============================
-                # TERMINATE
-                # ==============================
 
                 if (
                     self.camera_process.poll()
