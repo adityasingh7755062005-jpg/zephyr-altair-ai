@@ -4,6 +4,7 @@
 # FINAL STABLE BUILD
 # MANUAL CAMERA START VERSION
 # FULL FIXED VERSION
+# LOCAL + CLOUD CAMERA FIXED
 # ==============================
 
 from cores.core_18_security_state import SecurityState
@@ -324,7 +325,7 @@ class Core18:
                 )
 
                 # ==============================
-                # WINDOWS HIDDEN PROCESS
+                # WINDOWS SETTINGS
                 # ==============================
 
                 creation_flags = 0
@@ -333,13 +334,7 @@ class Core18:
                 if os.name == "nt":
 
                     creation_flags = (
-                        subprocess.CREATE_NO_WINDOW
-                    )
-
-                    startupinfo = subprocess.STARTUPINFO()
-
-                    startupinfo.dwFlags |= (
-                        subprocess.STARTF_USESHOWWINDOW
+                        subprocess.CREATE_NEW_PROCESS_GROUP
                     )
 
                 # ==============================
@@ -350,14 +345,15 @@ class Core18:
 
                     [
                         python_exe,
+                        "-u",
                         webcam_path
                     ],
 
                     cwd=project_root,
 
-                    stdout=subprocess.DEVNULL,
+                    stdout=None,
 
-                    stderr=subprocess.DEVNULL,
+                    stderr=None,
 
                     stdin=subprocess.DEVNULL,
 
@@ -370,7 +366,7 @@ class Core18:
                 # WAIT
                 # ==============================
 
-                time.sleep(3)
+                time.sleep(5)
 
                 # ==============================
                 # VERIFY
@@ -393,6 +389,10 @@ class Core18:
                     )
 
                     return True
+
+                # ==============================
+                # PROCESS EXITED
+                # ==============================
 
                 exit_code = None
 
