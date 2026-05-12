@@ -5,6 +5,7 @@
 # MANUAL CAMERA START VERSION
 # FULL FIXED VERSION
 # LOCAL + CLOUD CAMERA FIXED
+# FINAL STABLE CAMERA PROCESS VERSION
 # ==============================
 
 from cores.core_18_security_state import SecurityState
@@ -265,6 +266,43 @@ class Core18:
         return project_root, webcam_path
 
     # ==============================
+    # CAMERA LOG READER
+    # ==============================
+
+    def _camera_log_reader(self):
+
+        try:
+
+            if not self.camera_process:
+                return
+
+            while True:
+
+                if not self.camera_process:
+                    break
+
+                line = (
+                    self.camera_process.stdout.readline()
+                )
+
+                if not line:
+                    break
+
+                line = line.strip()
+
+                if line:
+
+                    print(
+                        f"[WEBCAM] {line}"
+                    )
+
+        except Exception as e:
+
+            print(
+                f"[Core 18] Camera log reader error: {e}"
+            )
+
+    # ==============================
     # START LIVE CAMERA
     # ==============================
 
@@ -273,6 +311,30 @@ class Core18:
         with self.camera_lock:
 
             try:
+
+                # ==============================
+                # CLEAN DEAD PROCESS
+                # ==============================
+
+                if self.camera_process:
+
+                    try:
+
+                        if (
+                            self.camera_process.poll()
+                            is not None
+                        ):
+
+                            print(
+                                "[Core 18] ⚠️ Old camera process cleaned"
+                            )
+
+                            self.camera_process = None
+
+                            self.camera_running = False
+
+                    except:
+                        pass
 
                 # ==============================
                 # ALREADY RUNNING
@@ -335,6 +397,14 @@ class Core18:
 
                     creation_flags = (
                         subprocess.CREATE_NEW_PROCESS_GROUP
+                        |
+                        subprocess.CREATE_NO_WINDOW
+                    )
+
+                    startupinfo = subprocess.STARTUPINFO()
+
+                    startupinfo.dwFlags |= (
+                        subprocess.STARTF_USESHOWWINDOW
                     )
 
                 # ==============================
@@ -351,11 +421,15 @@ class Core18:
 
                     cwd=project_root,
 
-                    stdout=None,
+                    stdout=subprocess.PIPE,
 
-                    stderr=None,
+                    stderr=subprocess.STDOUT,
 
                     stdin=subprocess.DEVNULL,
+
+                    text=True,
+
+                    bufsize=1,
 
                     creationflags=creation_flags,
 
@@ -363,20 +437,41 @@ class Core18:
                 )
 
                 # ==============================
-                # WAIT
+                # START LOG THREAD
                 # ==============================
 
-                time.sleep(5)
+                threading.Thread(
+
+                    target=self._camera_log_reader,
+
+                    daemon=True
+
+                ).start()
+
+                # ==============================
+                # WAIT FOR STARTUP
+                # ==============================
+
+                startup_ok = False
+
+                for _ in range(10):
+
+                    time.sleep(1)
+
+                    if (
+                        self.camera_process
+                        and
+                        self.camera_process.poll() is None
+                    ):
+
+                        startup_ok = True
+                        break
 
                 # ==============================
                 # VERIFY
                 # ==============================
 
-                if (
-                    self.camera_process
-                    and
-                    self.camera_process.poll() is None
-                ):
+                if startup_ok:
 
                     self.camera_running = True
 
@@ -451,26 +546,34 @@ class Core18:
                     "[Core 18] 🛑 Stopping live camera..."
                 )
 
-                if (
-                    self.camera_process.poll()
-                    is None
-                ):
+                try:
 
-                    self.camera_process.terminate()
+                    if (
+                        self.camera_process.poll()
+                        is None
+                    ):
 
-                    try:
+                        self.camera_process.terminate()
 
-                        self.camera_process.wait(
-                            timeout=5
-                        )
+                        try:
 
-                    except Exception:
+                            self.camera_process.wait(
+                                timeout=5
+                            )
 
-                        print(
-                            "[Core 18] ⚠️ Force killing camera..."
-                        )
+                        except Exception:
 
-                        self.camera_process.kill()
+                            print(
+                                "[Core 18] ⚠️ Force killing camera..."
+                            )
+
+                            self.camera_process.kill()
+
+                except Exception as e:
+
+                    print(
+                        f"[Core 18] Camera terminate error: {e}"
+                    )
 
                 self.camera_process = None
 

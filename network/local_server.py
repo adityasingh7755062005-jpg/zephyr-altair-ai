@@ -1,6 +1,8 @@
 # ==============================
 # FILE: network/local_server.py
 # FULL CAMERA CONTROL VERSION
+# FULL FIXED STABLE VERSION
+# LOCAL + CLOUD CAMERA READY
 # ==============================
 
 from fastapi import FastAPI, Request
@@ -9,6 +11,7 @@ from fastapi.responses import JSONResponse
 import threading
 import time
 import logging
+import socket
 
 from network.security import verify_request
 
@@ -51,6 +54,62 @@ class LocalServer:
         )
 
     # ==============================
+    # VERIFY REQUEST
+    # ==============================
+
+    def verify(
+        self,
+        params
+    ):
+
+        try:
+
+            device_id = params.get(
+                "device"
+            )
+
+            if not self.is_trusted_device(
+                device_id
+            ):
+
+                return (
+                    False,
+                    "untrusted device"
+                )
+
+            valid, msg = verify_request(
+
+                params.get("cmd"),
+
+                params.get("ts"),
+
+                device_id,
+
+                params.get("sig"),
+
+                params.get("nonce")
+            )
+
+            if not valid:
+
+                return (
+                    False,
+                    msg
+                )
+
+            return (
+                True,
+                "ok"
+            )
+
+        except Exception as e:
+
+            return (
+                False,
+                str(e)
+            )
+
+    # ==============================
     # ROUTES
     # ==============================
 
@@ -66,7 +125,13 @@ class LocalServer:
             return {
 
                 "status":
-                "Zephyr Local Server Running"
+                "Zephyr Local Server Running",
+
+                "camera_running":
+                self.core.is_camera_running(),
+
+                "time":
+                int(time.time())
             }
 
         # ==============================
@@ -80,7 +145,11 @@ class LocalServer:
 
                 "status": "alive",
 
-                "time": int(time.time())
+                "camera_running":
+                self.core.is_camera_running(),
+
+                "time":
+                int(time.time())
             }
 
         # ==============================
@@ -101,49 +170,14 @@ class LocalServer:
                     request.query_params
                 )
 
-                device_id = params.get(
-                    "device"
-                )
-
-                # ==============================
-                # TRUST CHECK
-                # ==============================
-
-                if not self.is_trusted_device(
-                    device_id
-                ):
-
-                    print(
-                        "❌ Untrusted Device"
-                    )
-
-                    return JSONResponse(
-
-                        status_code=403,
-
-                        content={
-                            "error":
-                            "untrusted device"
-                        }
-                    )
-
-                valid, msg = verify_request(
-
-                    params.get("cmd"),
-
-                    params.get("ts"),
-
-                    device_id,
-
-                    params.get("sig"),
-
-                    params.get("nonce")
+                valid, msg = self.verify(
+                    params
                 )
 
                 if not valid:
 
                     print(
-                        f"❌ REJECTED LOCK: {msg}"
+                        f"❌ LOCK REJECTED: {msg}"
                     )
 
                     return JSONResponse(
@@ -166,6 +200,10 @@ class LocalServer:
                 }
 
             except Exception as e:
+
+                print(
+                    f"❌ LOCK ERROR: {e}"
+                )
 
                 return JSONResponse(
 
@@ -194,49 +232,14 @@ class LocalServer:
                     request.query_params
                 )
 
-                device_id = params.get(
-                    "device"
-                )
-
-                # ==============================
-                # TRUST CHECK
-                # ==============================
-
-                if not self.is_trusted_device(
-                    device_id
-                ):
-
-                    print(
-                        "❌ Untrusted Device"
-                    )
-
-                    return JSONResponse(
-
-                        status_code=403,
-
-                        content={
-                            "error":
-                            "untrusted device"
-                        }
-                    )
-
-                valid, msg = verify_request(
-
-                    params.get("cmd"),
-
-                    params.get("ts"),
-
-                    device_id,
-
-                    params.get("sig"),
-
-                    params.get("nonce")
+                valid, msg = self.verify(
+                    params
                 )
 
                 if not valid:
 
                     print(
-                        f"❌ REJECTED UNLOCK: {msg}"
+                        f"❌ UNLOCK REJECTED: {msg}"
                     )
 
                     return JSONResponse(
@@ -259,6 +262,10 @@ class LocalServer:
                 }
 
             except Exception as e:
+
+                print(
+                    f"❌ UNLOCK ERROR: {e}"
+                )
 
                 return JSONResponse(
 
@@ -287,50 +294,14 @@ class LocalServer:
                     request.query_params
                 )
 
-                device_id = params.get(
-                    "device"
-                )
-
-                # ==============================
-                # TRUST CHECK
-                # ==============================
-
-                if not self.is_trusted_device(
-                    device_id
-                ):
-
-                    print(
-                        "❌ Untrusted Camera Start"
-                    )
-
-                    return JSONResponse(
-
-                        status_code=403,
-
-                        content={
-                            "error":
-                            "untrusted device"
-                        }
-                    )
-
-                valid, msg = verify_request(
-
-                    params.get("cmd"),
-
-                    params.get("ts"),
-
-                    device_id,
-
-                    params.get("sig"),
-
-                    params.get("nonce")
+                valid, msg = self.verify(
+                    params
                 )
 
                 if not valid:
 
                     print(
-                        f"❌ CAMERA START REJECTED: "
-                        f"{msg}"
+                        f"❌ CAMERA START REJECTED: {msg}"
                     )
 
                     return JSONResponse(
@@ -342,6 +313,7 @@ class LocalServer:
                         }
                     )
 
+                print("")
                 print(
                     "📷 START CAMERA REQUEST"
                 )
@@ -349,6 +321,10 @@ class LocalServer:
                 result = (
                     self.core
                     .start_live_camera()
+                )
+
+                print(
+                    f"📷 Camera Running: {result}"
                 )
 
                 return {
@@ -361,6 +337,10 @@ class LocalServer:
                 }
 
             except Exception as e:
+
+                print(
+                    f"❌ CAMERA START ERROR: {e}"
+                )
 
                 return JSONResponse(
 
@@ -389,50 +369,14 @@ class LocalServer:
                     request.query_params
                 )
 
-                device_id = params.get(
-                    "device"
-                )
-
-                # ==============================
-                # TRUST CHECK
-                # ==============================
-
-                if not self.is_trusted_device(
-                    device_id
-                ):
-
-                    print(
-                        "❌ Untrusted Camera Stop"
-                    )
-
-                    return JSONResponse(
-
-                        status_code=403,
-
-                        content={
-                            "error":
-                            "untrusted device"
-                        }
-                    )
-
-                valid, msg = verify_request(
-
-                    params.get("cmd"),
-
-                    params.get("ts"),
-
-                    device_id,
-
-                    params.get("sig"),
-
-                    params.get("nonce")
+                valid, msg = self.verify(
+                    params
                 )
 
                 if not valid:
 
                     print(
-                        f"❌ CAMERA STOP REJECTED: "
-                        f"{msg}"
+                        f"❌ CAMERA STOP REJECTED: {msg}"
                     )
 
                     return JSONResponse(
@@ -444,6 +388,7 @@ class LocalServer:
                         }
                     )
 
+                print("")
                 print(
                     "🛑 STOP CAMERA REQUEST"
                 )
@@ -457,6 +402,10 @@ class LocalServer:
                 }
 
             except Exception as e:
+
+                print(
+                    f"❌ CAMERA STOP ERROR: {e}"
+                )
 
                 return JSONResponse(
 
@@ -485,39 +434,8 @@ class LocalServer:
                     request.query_params
                 )
 
-                device_id = params.get(
-                    "device"
-                )
-
-                # ==============================
-                # TRUST CHECK
-                # ==============================
-
-                if not self.is_trusted_device(
-                    device_id
-                ):
-
-                    return JSONResponse(
-
-                        status_code=403,
-
-                        content={
-                            "error":
-                            "untrusted device"
-                        }
-                    )
-
-                valid, msg = verify_request(
-
-                    params.get("cmd"),
-
-                    params.get("ts"),
-
-                    device_id,
-
-                    params.get("sig"),
-
-                    params.get("nonce")
+                valid, msg = self.verify(
+                    params
                 )
 
                 if not valid:
@@ -544,6 +462,10 @@ class LocalServer:
 
             except Exception as e:
 
+                print(
+                    f"❌ CAMERA STATUS ERROR: {e}"
+                )
+
                 return JSONResponse(
 
                     status_code=500,
@@ -554,50 +476,63 @@ class LocalServer:
                 )
 
     # ==============================
+    # GET LOCAL IP
+    # ==============================
+
+    def get_local_ip(self):
+
+        s = socket.socket(
+            socket.AF_INET,
+            socket.SOCK_DGRAM
+        )
+
+        try:
+
+            s.connect(
+                ("8.8.8.8", 80)
+            )
+
+            ip = s.getsockname()[0]
+
+        except:
+
+            ip = "127.0.0.1"
+
+        finally:
+
+            s.close()
+
+        return ip
+
+    # ==============================
     # START SERVER
     # ==============================
 
     def start(self):
 
         import uvicorn
-        import socket
 
-        def get_local_ip():
+        local_ip = self.get_local_ip()
 
-            s = socket.socket(
-                socket.AF_INET,
-                socket.SOCK_DGRAM
-            )
-
-            try:
-
-                s.connect(
-                    ("8.8.8.8", 80)
-                )
-
-                ip = s.getsockname()[0]
-
-            except:
-
-                ip = "Unable to detect"
-
-            finally:
-
-                s.close()
-
-            return ip
-
-        local_ip = get_local_ip()
+        print("")
+        print("===================================")
+        print("🌐 ZEPHYR LOCAL SERVER")
+        print("===================================")
 
         print(
-            f"[LocalServer] Running on "
-            f"{HOST}:{PORT}"
+            f"✅ Local API Running:"
         )
 
         print(
-            f"🌐 Access from phone: "
-            f"http://{local_ip}:{PORT}"
+            f"   http://127.0.0.1:{PORT}"
         )
+
+        print(
+            f"   http://{local_ip}:{PORT}"
+        )
+
+        print("===================================")
+        print("")
 
         uvicorn.run(
 
@@ -607,7 +542,9 @@ class LocalServer:
 
             port=PORT,
 
-            log_level="error"
+            log_level="error",
+
+            access_log=False
         )
 
 

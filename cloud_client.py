@@ -1,6 +1,8 @@
 # ==============================
 # FILE: cloud_client.py
 # FULL CLOUD CAMERA CONTROL VERSION
+# FINAL STABLE CLOUD VERSION
+# FIXED RECONNECT + PING VERSION
 # ==============================
 
 import asyncio
@@ -8,6 +10,7 @@ import websockets
 import json
 import threading
 import traceback
+import time
 
 from network.security import verify_request
 
@@ -22,6 +25,8 @@ CLOUD_URL = (
 )
 
 RECONNECT_DELAY = 3
+
+PING_INTERVAL = 15
 
 # ==============================
 # CLOUD CLIENT
@@ -45,6 +50,12 @@ class CloudClient:
 
         self.websocket = None
 
+        self.loop = None
+
+        self.last_pong = time.time()
+
+        self.connection_lock = asyncio.Lock()
+
         print(
             "☁️ Cloud client initializing..."
         )
@@ -63,9 +74,19 @@ class CloudClient:
 
     def _start(self):
 
-        asyncio.run(
-            self._loop()
-        )
+        try:
+
+            asyncio.run(
+                self._loop()
+            )
+
+        except Exception as e:
+
+            print(
+                f"❌ Cloud thread crashed: {e}"
+            )
+
+            traceback.print_exc()
 
     # ==============================
     # MAIN LOOP
@@ -81,80 +102,78 @@ class CloudClient:
                     "🌐 Connecting to cloud..."
                 )
 
-                async with websockets.connect(
+                ws = await websockets.connect(
 
                     CLOUD_URL,
 
-                    ping_interval=20,
+                    ping_interval=None,
 
-                    ping_timeout=20,
+                    ping_timeout=None,
 
                     close_timeout=5,
 
-                    max_size=None
+                    max_size=None,
 
-                ) as ws:
+                    max_queue=None
+                )
+
+                async with self.connection_lock:
 
                     self.websocket = ws
 
                     self.connected = True
 
-                    # ==============================
-                    # REGISTER DEVICE
-                    # ==============================
+                self.connection.update_cloud(
+                    True
+                )
 
-                    register_payload = {
+                # ==============================
+                # REGISTER DEVICE
+                # ==============================
 
-                        "type": "register",
+                register_payload = {
 
-                        "device_id": DEVICE_ID
-                    }
+                    "type": "register",
 
-                    await ws.send(
-                        json.dumps(
-                            register_payload
-                        )
+                    "device_id": DEVICE_ID
+                }
+
+                await ws.send(
+                    json.dumps(
+                        register_payload
                     )
+                )
 
-                    self.connection.update_cloud(
-                        True
-                    )
+                print(
+                    f"✅ Connected as "
+                    f"{DEVICE_ID}"
+                )
 
-                    print(
-                        f"✅ Connected as "
-                        f"{DEVICE_ID}"
-                    )
+                # ==============================
+                # START TASKS
+                # ==============================
 
-                    # ==============================
-                    # RECEIVE LOOP
-                    # ==============================
+                receive_task = asyncio.create_task(
+                    self._receive_loop(ws)
+                )
 
-                    while self.running:
+                ping_task = asyncio.create_task(
+                    self._ping_loop(ws)
+                )
 
-                        try:
+                done, pending = await asyncio.wait(
 
-                            msg = await ws.recv()
+                    [
+                        receive_task,
+                        ping_task
+                    ],
 
-                            data = json.loads(msg)
+                    return_when=asyncio.FIRST_COMPLETED
+                )
 
-                            await self._handle(
-                                data
-                            )
+                for task in pending:
 
-                        except websockets.ConnectionClosed:
-
-                            print(
-                                "❌ Cloud websocket closed"
-                            )
-
-                            break
-
-                        except Exception as e:
-
-                            print(
-                                f"❌ Cloud receive error: "
-                                f"{e}"
-                            )
+                    task.cancel()
 
             except Exception as e:
 
@@ -163,25 +182,136 @@ class CloudClient:
                     f"{e}"
                 )
 
-            # ==============================
-            # DISCONNECTED
-            # ==============================
+            finally:
 
-            self.connected = False
+                try:
 
-            self.websocket = None
+                    async with self.connection_lock:
 
-            self.connection.update_cloud(
-                False
-            )
+                        self.connected = False
 
-            print(
-                f"🔄 Reconnecting in "
-                f"{RECONNECT_DELAY}s..."
-            )
+                        self.connection.update_cloud(
+                            False
+                        )
+
+                        if self.websocket:
+
+                            try:
+
+                                await self.websocket.close()
+
+                            except:
+                                pass
+
+                        self.websocket = None
+
+                except:
+                    pass
+
+                print(
+                    f"🔄 Reconnecting in "
+                    f"{RECONNECT_DELAY}s..."
+                )
+
+                await asyncio.sleep(
+                    RECONNECT_DELAY
+                )
+
+    # ==============================
+    # RECEIVE LOOP
+    # ==============================
+
+    async def _receive_loop(
+        self,
+        ws
+    ):
+
+        while self.running:
+
+            try:
+
+                raw = await ws.recv()
+
+                data = json.loads(raw)
+
+                msg_type = data.get("type")
+
+                # ==============================
+                # PONG
+                # ==============================
+
+                if msg_type == "pong":
+
+                    self.last_pong = time.time()
+
+                    continue
+
+                # ==============================
+                # HANDLE COMMAND
+                # ==============================
+
+                await self._handle(data)
+
+            except websockets.ConnectionClosed:
+
+                print(
+                    "❌ Cloud websocket closed"
+                )
+
+                break
+
+            except Exception as e:
+
+                print(
+                    f"❌ Cloud receive error: "
+                    f"{e}"
+                )
+
+                traceback.print_exc()
+
+                await asyncio.sleep(1)
+
+    # ==============================
+    # PING LOOP
+    # ==============================
+
+    async def _ping_loop(
+        self,
+        ws
+    ):
+
+        while self.running:
+
+            try:
+
+                ping_payload = {
+
+                    "type": "ping",
+
+                    "device_id": DEVICE_ID,
+
+                    "timestamp": int(
+                        time.time()
+                    )
+                }
+
+                await ws.send(
+                    json.dumps(
+                        ping_payload
+                    )
+                )
+
+            except Exception as e:
+
+                print(
+                    f"❌ Cloud ping failed: "
+                    f"{e}"
+                )
+
+                break
 
             await asyncio.sleep(
-                RECONNECT_DELAY
+                PING_INTERVAL
             )
 
     # ==============================
@@ -192,10 +322,6 @@ class CloudClient:
         self,
         data
     ):
-
-        # ==============================
-        # ONLY COMMANDS
-        # ==============================
 
         if data.get("type") != "command":
             return

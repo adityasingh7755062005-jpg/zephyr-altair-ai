@@ -1,14 +1,14 @@
-# ==============================
-# FILE 5: zephyr_cloud_server.py
-# FULL CLOUD CAMERA VERSION
-# FULL STABLE + TRUSTED DEVICE VERSION
-# FIXED CLOUD CAMERA RELAY
+Pp# ==============================
+# FILE: zephyr_cloud_server.py
+# FINAL ULTRA STABLE CLOUD SERVER
+# LOCAL + CLOUD CAMERA RELAY
 # ==============================
 
 import json
 import os
 import time
 import shutil
+import asyncio
 
 from fastapi import (
     FastAPI,
@@ -29,13 +29,13 @@ from network.security import verify_request
 app = FastAPI()
 
 # ==============================
-# ✅ TRUSTED DEVICE
+# TRUSTED DEVICE
 # ==============================
 
 TRUSTED_DEVICE_ID = "160c02a2018e7132"
 
 # ==============================
-# 🔥 FIREBASE INIT
+# FIREBASE INIT
 # ==============================
 
 if not firebase_admin._apps:
@@ -81,17 +81,15 @@ if not firebase_admin._apps:
 # MEMORY
 # ==============================
 
-# ✅ MOBILE CLIENTS
 clients = {}
-
-# ✅ FCM TOKENS
 fcm_tokens = {}
 
-# ✅ CAMERA STREAMERS
 camera_streamers = {}
-
-# ✅ CAMERA VIEWERS
 camera_viewers = {}
+
+viewer_locks = {}
+
+last_frame_log = {}
 
 # ==============================
 # STORAGE
@@ -127,6 +125,20 @@ def is_trusted_device(device_id):
     )
 
 # ==============================
+# SAFE SEND
+# ==============================
+
+async def safe_send(ws, data):
+
+    try:
+
+        await ws.send_text(data)
+        return True
+
+    except:
+        return False
+
+# ==============================
 # FCM SEND
 # ==============================
 
@@ -143,7 +155,6 @@ def send_fcm(
 
             notification=
             messaging.Notification(
-
                 title=title,
                 body=body
             ),
@@ -158,7 +169,6 @@ def send_fcm(
         )
 
         print("✅ FCM sent")
-        print("📨 Response:", response)
 
     except Exception as e:
 
@@ -189,28 +199,8 @@ async def register_fcm(
             device_id
         ):
 
-            print(
-                f"❌ Untrusted FCM Device: "
-                f"{device_id}"
-            )
-
             return {
-                "status": "error",
-                "message": "untrusted device"
-            }
-
-        if not device_id:
-
-            return {
-                "status": "error",
-                "message": "device_id missing"
-            }
-
-        if not fcm_token:
-
-            return {
-                "status": "error",
-                "message": "fcm_token missing"
+                "status": "error"
             }
 
         fcm_tokens[
@@ -218,13 +208,8 @@ async def register_fcm(
         ] = fcm_token
 
         print(
-            f"📱 FCM registered: "
+            f"📱 FCM Registered: "
             f"{device_id}"
-        )
-
-        print(
-            f"🔑 TOKEN: "
-            f"{fcm_token[:35]}..."
         )
 
         return {
@@ -233,18 +218,13 @@ async def register_fcm(
 
     except Exception as e:
 
-        print(
-            "❌ Register FCM error:",
-            e
-        )
-
         return {
             "status": "error",
             "message": str(e)
         }
 
 # ==============================
-# 🚨 INTRUDER UPLOAD
+# INTRUDER UPLOAD
 # ==============================
 
 @app.post("/upload_intruder")
@@ -264,27 +244,14 @@ async def upload_intruder(
             device_id
         ):
 
-            print(
-                f"❌ Untrusted Upload Device: "
-                f"{device_id}"
-            )
-
             return {
-                "status": "error",
-                "message": "untrusted device"
+                "status": "error"
             }
 
-        print(
-            "📥 Upload request received"
-        )
-
-        print(
-            f"📱 Device ID: "
-            f"{device_id}"
-        )
-
         filename = (
+
             f"{device_id}_"
+
             f"{int(time.time())}.jpg"
         )
 
@@ -307,8 +274,7 @@ async def upload_intruder(
             f"/intruders/{filename}"
         )
 
-        print("📸 Intruder uploaded")
-        print(f"🌐 URL: {url}")
+        print("📸 Intruder Uploaded")
 
         token = fcm_tokens.get(
             device_id
@@ -325,34 +291,13 @@ async def upload_intruder(
                 "Tap to view image",
 
                 {
-
                     "type": "intruder",
-
-                    "image_url": url,
-
-                    "time": time.strftime(
-                        "%H:%M:%S"
-                    ),
-
-                    "date": time.strftime(
-                        "%Y-%m-%d"
-                    ),
-
-                    "activity":
-                    "Intruder detected"
+                    "image_url": url
                 }
             )
 
-        else:
-
-            print(
-                "❌ No FCM token found"
-            )
-
         return {
-
             "status": "ok",
-
             "url": url
         }
 
@@ -364,10 +309,7 @@ async def upload_intruder(
         )
 
         return {
-
-            "status": "error",
-
-            "message": str(e)
+            "status": "error"
         }
 
 # ==============================
@@ -383,20 +325,23 @@ async def ws(ws: WebSocket):
     viewer_target = None
     role = None
 
-    connection_alive = True
-
     try:
 
-        while connection_alive:
+        while True:
 
-            raw = await ws.receive_text()
+            raw = await asyncio.wait_for(
+
+                ws.receive_text(),
+
+                timeout=60
+            )
 
             msg = json.loads(raw)
 
             msg_type = msg.get("type")
 
             # ==============================
-            # MOBILE DEVICE REGISTER
+            # MOBILE REGISTER
             # ==============================
 
             if msg_type == "register":
@@ -410,25 +355,17 @@ async def ws(ws: WebSocket):
                     device_id
                 ):
 
-                    print(
-                        f"❌ Untrusted Device Blocked: "
-                        f"{device_id}"
-                    )
-
                     await ws.close()
-
                     return
 
                 role = "mobile"
 
-                # ✅ FIXED
                 clients[
                     f"mobile_{device_id}"
                 ] = ws
 
-                print("")
                 print(
-                    f"📱 Mobile Connected: "
+                    f"\n📱 Mobile Connected: "
                     f"{device_id}"
                 )
 
@@ -447,13 +384,7 @@ async def ws(ws: WebSocket):
                     device_id
                 ):
 
-                    print(
-                        f"❌ Untrusted Camera Blocked: "
-                        f"{device_id}"
-                    )
-
                     await ws.close()
-
                     return
 
                 role = "camera"
@@ -462,13 +393,22 @@ async def ws(ws: WebSocket):
                     device_id
                 ] = ws
 
-                print("")
-                print(
-                    "📷 Camera Stream Connected"
-                )
+                last_frame_log[
+                    device_id
+                ] = time.time()
 
                 print(
-                    f"📱 Device: {device_id}"
+                    f"\n📷 Camera Connected: "
+                    f"{device_id}"
+                )
+
+                await safe_send(
+
+                    ws,
+
+                    json.dumps({
+                        "type": "auth_ok"
+                    })
                 )
 
             # ==============================
@@ -486,13 +426,7 @@ async def ws(ws: WebSocket):
                     viewer_target
                 ):
 
-                    print(
-                        f"❌ Untrusted Viewer Target: "
-                        f"{viewer_target}"
-                    )
-
                     await ws.close()
-
                     return
 
                 role = "viewer"
@@ -507,13 +441,8 @@ async def ws(ws: WebSocket):
                     viewer_target
                 ].add(ws)
 
-                print("")
                 print(
-                    "👁️ Viewer Connected"
-                )
-
-                print(
-                    f"🎯 Target: "
+                    f"\n👁️ Viewer Connected → "
                     f"{viewer_target}"
                 )
 
@@ -522,8 +451,25 @@ async def ws(ws: WebSocket):
                     f"{len(camera_viewers[viewer_target])}"
                 )
 
+                # notify camera
+
+                cam_ws = camera_streamers.get(
+                    viewer_target
+                )
+
+                if cam_ws:
+
+                    await safe_send(
+
+                        cam_ws,
+
+                        json.dumps({
+                            "type": "viewer_connected"
+                        })
+                    )
+
             # ==============================
-            # CAMERA FRAME RELAY
+            # CAMERA FRAME
             # ==============================
 
             elif msg_type == "camera_frame":
@@ -547,28 +493,44 @@ async def ws(ws: WebSocket):
                 if not viewers:
                     continue
 
-                dead_viewers = set()
+                now = time.time()
+
+                if (
+
+                    now -
+
+                    last_frame_log.get(
+                        source_device,
+                        0
+                    )
+
+                    > 10
+                ):
+
+                    print(
+
+                        f"\n☁️ Cloud Frames Active | "
+                        f"Viewers: {len(viewers)}"
+                    )
+
+                    last_frame_log[
+                        source_device
+                    ] = now
+
+                dead = set()
 
                 for viewer_ws in list(viewers):
 
-                    try:
+                    ok = await safe_send(
+                        viewer_ws,
+                        raw
+                    )
 
-                        await viewer_ws.send_text(
-                            raw
-                        )
-
-                    except Exception as e:
-
-                        print(
-                            f"❌ Viewer Send Failed: {e}"
-                        )
-
-                        dead_viewers.add(
-                            viewer_ws
-                        )
+                    if not ok:
+                        dead.add(viewer_ws)
 
                 viewers.difference_update(
-                    dead_viewers
+                    dead
                 )
 
             # ==============================
@@ -577,21 +539,17 @@ async def ws(ws: WebSocket):
 
             elif msg_type == "ping":
 
-                try:
+                await safe_send(
 
-                    await ws.send_text(
+                    ws,
 
-                        json.dumps({
-                            "type": "pong"
-                        })
-                    )
-
-                except:
-
-                    connection_alive = False
+                    json.dumps({
+                        "type": "pong"
+                    })
+                )
 
             # ==============================
-            # COMMAND SYSTEM
+            # COMMAND
             # ==============================
 
             elif msg_type == "command":
@@ -620,36 +578,21 @@ async def ws(ws: WebSocket):
                     target
                 ):
 
-                    print(
-                        f"❌ Untrusted Command Target: "
-                        f"{target}"
-                    )
-
                     continue
-
-                print(
-                    f"📩 CLOUD CMD → "
-                    f"{target} : {action}"
-                )
 
                 valid, reason = verify_request(
 
                     action,
-
                     ts,
-
                     target,
-
                     sig,
-
                     nonce
                 )
 
                 if not valid:
 
                     print(
-                        f"❌ CLOUD REJECTED: "
-                        f"{reason}"
+                        f"❌ Rejected: {reason}"
                     )
 
                     continue
@@ -660,45 +603,41 @@ async def ws(ws: WebSocket):
 
                 if mobile_ws:
 
-                    try:
+                    ok = await safe_send(
 
-                        await mobile_ws.send_text(
+                        mobile_ws,
 
-                            json.dumps({
+                        json.dumps({
 
-                                "type": "command",
+                            "type": "command",
 
-                                "action": action,
+                            "action": action,
 
-                                "ts": ts,
+                            "ts": ts,
 
-                                "sig": sig,
+                            "sig": sig,
 
-                                "nonce": nonce
-                            })
-                        )
-
-                        print(
-                            "✅ Command forwarded"
-                        )
-
-                    except Exception as e:
-
-                        print(
-                            f"❌ Forward failed: {e}"
-                        )
-
-                else:
-
-                    print(
-                        "❌ Target not connected"
+                            "nonce": nonce
+                        })
                     )
+
+                    if ok:
+
+                        print(
+                            f"✅ Command Forwarded: "
+                            f"{action}"
+                        )
+
+    except asyncio.TimeoutError:
+
+        print(
+            "\n⏰ Connection Timeout"
+        )
 
     except WebSocketDisconnect:
 
-        print("")
         print(
-            f"⚠️ Disconnected: "
+            f"\n⚠️ Disconnected: "
             f"{device_id}"
         )
 
@@ -711,7 +650,7 @@ async def ws(ws: WebSocket):
     finally:
 
         # ==============================
-        # REMOVE MOBILE
+        # MOBILE CLEANUP
         # ==============================
 
         if (
@@ -725,7 +664,7 @@ async def ws(ws: WebSocket):
             ]
 
         # ==============================
-        # REMOVE CAMERA
+        # CAMERA CLEANUP
         # ==============================
 
         if (
@@ -739,11 +678,12 @@ async def ws(ws: WebSocket):
             ]
 
             print(
-                "📷 Camera Stream Removed"
+                f"\n📷 Camera Removed: "
+                f"{device_id}"
             )
 
         # ==============================
-        # REMOVE VIEWER
+        # VIEWER CLEANUP
         # ==============================
 
         if (
@@ -765,12 +705,11 @@ async def ws(ws: WebSocket):
                 ]
 
             print(
-                "👁️ Viewer Removed"
+                "\n👁️ Viewer Removed"
             )
 
-        print("")
         print(
-            f"📊 Mobiles: {len(clients)} | "
+            f"\n📊 Mobiles: {len(clients)} | "
             f"Cameras: {len(camera_streamers)} | "
             f"Viewer Groups: {len(camera_viewers)}"
         )
