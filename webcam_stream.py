@@ -145,7 +145,9 @@ async def safe_cloud_send(payload):
             return False
 
         if cloud_ws.closed:
+
             cloud_connected = False
+
             return False
 
         async with cloud_send_lock:
@@ -200,8 +202,20 @@ async def cloud_receiver(ws):
                         "\n[VIEWER] Cloud Viewer Disconnected"
                     )
 
-            except:
+            except Exception:
                 pass
+
+    except websockets.ConnectionClosedOK:
+
+        print(
+            "\n[CLOUD] Connection Closed Normally"
+        )
+
+    except websockets.ConnectionClosedError as e:
+
+        print(
+            f"\n[ERROR] Cloud Receiver Closed: {e}"
+        )
 
     except Exception as e:
 
@@ -232,7 +246,7 @@ async def cloud_ping_loop():
                     })
                 )
 
-            await asyncio.sleep(10)
+            await asyncio.sleep(20)
 
         except Exception:
 
@@ -257,12 +271,13 @@ async def cloud_connection_loop():
 
                 CLOUD_URI,
 
-                ping_interval=20,
-                ping_timeout=20,
+                ping_interval=60,
+                ping_timeout=60,
 
-                close_timeout=5,
+                close_timeout=10,
 
-                max_size=None
+                max_size=None,
+                max_queue=None
             )
 
             cloud_ws = ws
@@ -301,6 +316,7 @@ async def cloud_connection_loop():
             try:
 
                 if cloud_ws:
+
                     await cloud_ws.close()
 
             except:
@@ -330,6 +346,12 @@ async def stream_camera():
         try:
 
             start_time = time.time()
+
+            if camera is None:
+
+                await asyncio.sleep(1)
+
+                continue
 
             success, frame = camera.read()
 
@@ -572,8 +594,8 @@ async def main():
 
         max_size=None,
 
-        ping_interval=20,
-        ping_timeout=20
+        ping_interval=60,
+        ping_timeout=60
     )
 
     print(
@@ -623,12 +645,14 @@ def cleanup():
     try:
 
         if camera:
+
             camera.release()
 
     except:
         pass
 
     try:
+
         cv2.destroyAllWindows()
 
     except:
