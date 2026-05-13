@@ -4,6 +4,7 @@
 # FINAL ULTRA STABLE VERSION
 # LOCAL + CLOUD + AUTO RECOVERY
 # WINDOWS UTF-8 FIXED VERSION
+# FULLY FIXED CLOUD STREAM VERSION
 # ==============================
 
 import sys
@@ -63,7 +64,7 @@ fps_counter = 0
 fps_timer = time.time()
 current_fps = 0
 
-last_cloud_log = 0
+last_stats_log = 0
 
 # ==============================
 # CAMERA INIT
@@ -73,7 +74,7 @@ def initialize_camera():
 
     global camera
 
-    print("[CAMERA] Initializing camera...")
+    print("[WEBCAM] Initializing camera...")
 
     try:
 
@@ -84,7 +85,7 @@ def initialize_camera():
 
         if not camera.isOpened():
 
-            print("[WARNING] CAP_DSHOW failed")
+            print("[WEBCAM] CAP_DSHOW failed")
 
             camera.release()
 
@@ -111,14 +112,14 @@ def initialize_camera():
             1
         )
 
-        print("[OK] Camera initialized")
+        print("[WEBCAM] Camera initialized")
 
         return True
 
     except Exception as e:
 
         print(
-            f"[ERROR] Camera Init Failed: {e}"
+            f"[WEBCAM] Camera Init Failed: {e}"
         )
 
         traceback.print_exc()
@@ -140,26 +141,32 @@ async def safe_cloud_send(payload):
         if (
             not cloud_connected
             or
-            not cloud_ws
+            cloud_ws is None
         ):
-            return False
-
-        if cloud_ws.closed:
-
-            cloud_connected = False
-
             return False
 
         async with cloud_send_lock:
 
-            await cloud_ws.send(payload)
+            try:
+
+                await cloud_ws.send(payload)
+
+            except websockets.ConnectionClosed:
+
+                print(
+                    "\n[WEBCAM] Cloud websocket closed"
+                )
+
+                cloud_connected = False
+
+                return False
 
         return True
 
     except Exception as e:
 
         print(
-            f"\n[ERROR] Cloud Send Failed: {e}"
+            f"\n[WEBCAM] Cloud Send Failed: {e}"
         )
 
         cloud_connected = False
@@ -187,40 +194,38 @@ async def cloud_receiver(ws):
                 if msg_type == "auth_ok":
 
                     print(
-                        "\n[CLOUD] Auth Success"
+                        "\n[WEBCAM] Cloud Auth Success"
                     )
 
                 elif msg_type == "viewer_connected":
 
                     print(
-                        "\n[VIEWER] Cloud Viewer Connected"
+                        "\n[WEBCAM] Viewer Connected"
                     )
 
                 elif msg_type == "viewer_disconnected":
 
                     print(
-                        "\n[VIEWER] Cloud Viewer Disconnected"
+                        "\n[WEBCAM] Viewer Disconnected"
                     )
+
+                elif msg_type == "pong":
+
+                    pass
 
             except Exception:
                 pass
 
-    except websockets.ConnectionClosedOK:
+    except websockets.ConnectionClosed:
 
         print(
-            "\n[CLOUD] Connection Closed Normally"
-        )
-
-    except websockets.ConnectionClosedError as e:
-
-        print(
-            f"\n[ERROR] Cloud Receiver Closed: {e}"
+            "\n[WEBCAM] Cloud connection closed"
         )
 
     except Exception as e:
 
         print(
-            f"\n[ERROR] Cloud Receiver Error: {e}"
+            f"\n[WEBCAM] Cloud Receiver Error: {e}"
         )
 
     finally:
@@ -239,12 +244,16 @@ async def cloud_ping_loop():
 
             if cloud_connected:
 
-                await safe_cloud_send(
-                    json.dumps({
-                        "type": "ping",
-                        "device_id": DEVICE_ID
-                    })
-                )
+                payload = json.dumps({
+
+                    "type": "ping",
+
+                    "device_id": DEVICE_ID,
+
+                    "timestamp": int(time.time())
+                })
+
+                await safe_cloud_send(payload)
 
             await asyncio.sleep(20)
 
@@ -265,14 +274,16 @@ async def cloud_connection_loop():
 
         try:
 
-            print("\n[CLOUD] Connecting To Cloud...")
+            print(
+                "\n[WEBCAM] Connecting To Cloud..."
+            )
 
             ws = await websockets.connect(
 
                 CLOUD_URI,
 
-                ping_interval=60,
-                ping_timeout=60,
+                ping_interval=None,
+                ping_timeout=None,
 
                 close_timeout=10,
 
@@ -298,7 +309,7 @@ async def cloud_connection_loop():
             cloud_connected = True
 
             print(
-                "\n[CLOUD] Connected"
+                "[WEBCAM] Cloud Connected"
             )
 
             await cloud_receiver(ws)
@@ -306,7 +317,7 @@ async def cloud_connection_loop():
         except Exception as e:
 
             print(
-                f"\n[ERROR] Cloud Error: {e}"
+                f"\n[WEBCAM] Cloud Error: {e}"
             )
 
         finally:
@@ -325,7 +336,7 @@ async def cloud_connection_loop():
             cloud_ws = None
 
             print(
-                "\n[CLOUD] Reconnecting in 3s..."
+                "[WEBCAM] Reconnecting in 3s..."
             )
 
             await asyncio.sleep(3)
@@ -339,7 +350,7 @@ async def stream_camera():
     global fps_counter
     global fps_timer
     global current_fps
-    global last_cloud_log
+    global last_stats_log
 
     while True:
 
@@ -358,7 +369,7 @@ async def stream_camera():
             if not success:
 
                 print(
-                    "\n[ERROR] Camera Frame Failed"
+                    "[WEBCAM] Camera Frame Failed"
                 )
 
                 await asyncio.sleep(1)
@@ -434,7 +445,7 @@ async def stream_camera():
             )
 
             # ==============================
-            # CLOUD
+            # CLOUD SEND
             # ==============================
 
             if cloud_connected:
@@ -455,44 +466,38 @@ async def stream_camera():
 
                 current_fps = fps_counter
 
-                frame_kb = round(
-                    len(buffer) / 1024,
-                    1
-                )
-
-                cloud_status = (
-
-                    "ONLINE"
-
-                    if cloud_connected
-
-                    else "OFFLINE"
-                )
-
-                print(
-
-                    f"\r[CAMERA] FPS: {current_fps} | "
-                    f"Local: {len(connected_clients)} | "
-                    f"Cloud: {cloud_status} | "
-                    f"{frame_kb} KB      ",
-
-                    end=""
-                )
-
-                if (
-                    cloud_connected
-                    and
-                    time.time() - last_cloud_log > 10
-                ):
-
-                    print(
-                        "\n[CLOUD] Frames Streaming"
-                    )
-
-                    last_cloud_log = time.time()
-
                 fps_counter = 0
+
                 fps_timer = time.time()
+
+                # ==============================
+                # REDUCED LOGS
+                # ==============================
+
+                if SHOW_STATS:
+
+                    if (
+                        time.time() - last_stats_log
+                        >= 10
+                    ):
+
+                        cloud_status = (
+
+                            "ONLINE"
+
+                            if cloud_connected
+
+                            else "OFFLINE"
+                        )
+
+                        print(
+
+                            f"[WEBCAM] FPS={current_fps} | "
+                            f"Local={len(connected_clients)} | "
+                            f"Cloud={cloud_status}"
+                        )
+
+                        last_stats_log = time.time()
 
             processing_time = (
                 time.time() - start_time
@@ -513,7 +518,7 @@ async def stream_camera():
         except Exception as e:
 
             print(
-                f"\n[ERROR] Stream Error: {e}"
+                f"\n[WEBCAM] Stream Error: {e}"
             )
 
             traceback.print_exc()
@@ -527,7 +532,7 @@ async def stream_camera():
 async def handler(websocket):
 
     print(
-        "\n[LOCAL] Mobile Connected"
+        "\n[WEBCAM] Local Mobile Connected"
     )
 
     connected_clients.add(
@@ -557,7 +562,7 @@ async def handler(websocket):
     except:
 
         print(
-            "\n[LOCAL] Mobile Disconnected"
+            "\n[WEBCAM] Local Mobile Disconnected"
         )
 
     finally:
@@ -581,8 +586,8 @@ async def main():
 
     print("")
     print("===================================")
-    print("[OK] ZEPHYR LIVE CAMERA ENGINE")
-    print("[OK] LOCAL + CLOUD STABLE")
+    print("[WEBCAM] ZEPHYR LIVE CAMERA ENGINE")
+    print("[WEBCAM] LOCAL + CLOUD STABLE")
     print("===================================")
 
     server = await websockets.serve(
@@ -599,11 +604,11 @@ async def main():
     )
 
     print(
-        f"[OK] Local Server: ws://0.0.0.0:{PORT}"
+        f"[WEBCAM] Local Server: ws://0.0.0.0:{PORT}"
     )
 
     print(
-        f"[OK] Cloud Server: {CLOUD_URI}"
+        f"[WEBCAM] Cloud Server: {CLOUD_URI}"
     )
 
     stream_task = asyncio.create_task(
@@ -640,7 +645,9 @@ def cleanup():
 
     global camera
 
-    print("\n[STOP] Closing Camera Engine")
+    print(
+        "\n[WEBCAM] Closing Camera Engine"
+    )
 
     try:
 
@@ -675,7 +682,7 @@ if __name__ == "__main__":
     except Exception as e:
 
         print(
-            f"\n[ERROR] Fatal Error: {e}"
+            f"\n[WEBCAM] Fatal Error: {e}"
         )
 
         traceback.print_exc()
