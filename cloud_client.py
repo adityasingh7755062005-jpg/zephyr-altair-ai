@@ -5,6 +5,7 @@
 # FIXED DEAD SOCKET VERSION
 # FIXED COMMAND DELIVERY VERSION
 # FIXED AUTO RECONNECT VERSION
+# FINAL HEARTBEAT STABLE VERSION
 # ==============================
 
 import asyncio
@@ -30,7 +31,7 @@ RECONNECT_DELAY = 3
 
 PING_INTERVAL = 20
 
-PING_TIMEOUT = 60
+PING_TIMEOUT = 90
 
 # ==============================
 # CLOUD CLIENT
@@ -144,9 +145,15 @@ class CloudClient:
                     "device_id": DEVICE_ID
                 }
 
-                await self._safe_send_raw(
+                ok = await self._safe_send_raw(
                     register_payload
                 )
+
+                if not ok:
+
+                    raise Exception(
+                        "Register failed"
+                    )
 
                 print(
                     f"✅ Connected as "
@@ -154,7 +161,7 @@ class CloudClient:
                 )
 
                 # ==============================
-                # TASKS
+                # START TASKS
                 # ==============================
 
                 receive_task = asyncio.create_task(
@@ -179,6 +186,11 @@ class CloudClient:
                 for task in pending:
 
                     task.cancel()
+
+                    try:
+                        await task
+                    except:
+                        pass
 
             except Exception as e:
 
@@ -260,7 +272,24 @@ class CloudClient:
             except asyncio.TimeoutError:
 
                 print(
-                    "❌ Cloud timeout"
+                    "⚠️ Cloud timeout detected"
+                )
+
+                break
+
+            except websockets.ConnectionClosedOK:
+
+                print(
+                    "⚠️ Cloud websocket closed normally"
+                )
+
+                break
+
+            except websockets.ConnectionClosedError as e:
+
+                print(
+                    f"❌ Cloud websocket error: "
+                    f"{e}"
                 )
 
                 break
@@ -280,6 +309,8 @@ class CloudClient:
                     f"{e}"
                 )
 
+                traceback.print_exc()
+
                 await asyncio.sleep(1)
 
     # ==============================
@@ -295,10 +326,6 @@ class CloudClient:
 
             try:
 
-                # ==============================
-                # CONNECTION CHECK
-                # ==============================
-
                 if not self.connected:
 
                     break
@@ -306,7 +333,7 @@ class CloudClient:
                 now = time.time()
 
                 # ==============================
-                # PING TIMEOUT CHECK
+                # PONG TIMEOUT
                 # ==============================
 
                 if (
@@ -390,6 +417,16 @@ class CloudClient:
                 )
 
             return True
+
+        except websockets.ConnectionClosed:
+
+            print(
+                "❌ Websocket closed during send"
+            )
+
+            self.connected = False
+
+            return False
 
         except Exception as e:
 
