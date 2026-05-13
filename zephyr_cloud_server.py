@@ -2,6 +2,9 @@
 # FILE: zephyr_cloud_server.py
 # FINAL ULTRA STABLE CLOUD SERVER
 # LOCAL + CLOUD CAMERA RELAY
+# FIXED NETWORK SWITCHING VERSION
+# FIXED DEAD SOCKET VERSION
+# FIXED CLOUD COMMAND RELAY VERSION
 # ==============================
 
 import json
@@ -90,6 +93,7 @@ camera_viewers = {}
 viewer_locks = {}
 
 last_frame_log = {}
+last_ping = {}
 
 # ==============================
 # STORAGE
@@ -136,7 +140,132 @@ async def safe_send(ws, data):
         return True
 
     except:
+
+        try:
+            await ws.close()
+        except:
+            pass
+
         return False
+
+# ==============================
+# CLEAN DEAD VIEWERS
+# ==============================
+
+async def cleanup_dead_viewers():
+
+    while True:
+
+        try:
+
+            await asyncio.sleep(15)
+
+            dead_groups = []
+
+            for device_id, viewers in list(camera_viewers.items()):
+
+                dead = set()
+
+                for viewer_ws in list(viewers):
+
+                    try:
+
+                        await viewer_ws.send_text(
+                            json.dumps({
+                                "type": "ping"
+                            })
+                        )
+
+                    except:
+
+                        dead.add(viewer_ws)
+
+                viewers.difference_update(dead)
+
+                if not viewers:
+
+                    dead_groups.append(device_id)
+
+            for group in dead_groups:
+
+                if group in camera_viewers:
+                    del camera_viewers[group]
+
+        except Exception as e:
+
+            print(
+                f"❌ Viewer cleanup error: {e}"
+            )
+
+# ==============================
+# CLEAN DEAD CAMERAS
+# ==============================
+
+async def cleanup_dead_cameras():
+
+    while True:
+
+        try:
+
+            await asyncio.sleep(20)
+
+            now = time.time()
+
+            dead = []
+
+            for device_id, ts in list(last_ping.items()):
+
+                if now - ts > 90:
+
+                    dead.append(device_id)
+
+            for device_id in dead:
+
+                if device_id in camera_streamers:
+
+                    try:
+                        await camera_streamers[
+                            device_id
+                        ].close()
+                    except:
+                        pass
+
+                    del camera_streamers[
+                        device_id
+                    ]
+
+                    print(
+                        f"❌ Dead Camera Removed: "
+                        f"{device_id}"
+                    )
+
+                if device_id in last_ping:
+                    del last_ping[device_id]
+
+        except Exception as e:
+
+            print(
+                f"❌ Camera cleanup error: {e}"
+            )
+
+# ==============================
+# START BACKGROUND TASKS
+# ==============================
+
+@app.on_event("startup")
+async def startup_tasks():
+
+    asyncio.create_task(
+        cleanup_dead_viewers()
+    )
+
+    asyncio.create_task(
+        cleanup_dead_cameras()
+    )
+
+    print(
+        "✅ Cleanup Tasks Started"
+    )
 
 # ==============================
 # FCM SEND
@@ -164,7 +293,7 @@ def send_fcm(
             token=token
         )
 
-        response = messaging.send(
+        messaging.send(
             message
         )
 
@@ -333,7 +462,7 @@ async def ws(ws: WebSocket):
 
                 ws.receive_text(),
 
-                timeout=60
+                timeout=120
             )
 
             msg = json.loads(raw)
@@ -360,9 +489,24 @@ async def ws(ws: WebSocket):
 
                 role = "mobile"
 
+                old_ws = clients.get(
+                    f"mobile_{device_id}"
+                )
+
+                if old_ws:
+
+                    try:
+                        await old_ws.close()
+                    except:
+                        pass
+
                 clients[
                     f"mobile_{device_id}"
                 ] = ws
+
+                last_ping[
+                    f"mobile_{device_id}"
+                ] = time.time()
 
                 print(
                     f"\n📱 Mobile Connected: "
@@ -389,11 +533,26 @@ async def ws(ws: WebSocket):
 
                 role = "camera"
 
+                old_camera = camera_streamers.get(
+                    device_id
+                )
+
+                if old_camera:
+
+                    try:
+                        await old_camera.close()
+                    except:
+                        pass
+
                 camera_streamers[
                     device_id
                 ] = ws
 
                 last_frame_log[
+                    device_id
+                ] = time.time()
+
+                last_ping[
                     device_id
                 ] = time.time()
 
@@ -446,13 +605,6 @@ async def ws(ws: WebSocket):
                     f"{viewer_target}"
                 )
 
-                print(
-                    f"👥 Total Viewers: "
-                    f"{len(camera_viewers[viewer_target])}"
-                )
-
-                # notify camera
-
                 cam_ws = camera_streamers.get(
                     viewer_target
                 )
@@ -485,6 +637,10 @@ async def ws(ws: WebSocket):
 
                     continue
 
+                last_ping[
+                    source_device
+                ] = time.time()
+
                 viewers = camera_viewers.get(
                     source_device,
                     set()
@@ -504,12 +660,12 @@ async def ws(ws: WebSocket):
                         0
                     )
 
-                    > 10
+                    > 15
                 ):
 
                     print(
 
-                        f"\n☁️ Cloud Frames Active | "
+                        f"\n☁️ Streaming Active | "
                         f"Viewers: {len(viewers)}"
                     )
 
@@ -538,6 +694,12 @@ async def ws(ws: WebSocket):
             # ==============================
 
             elif msg_type == "ping":
+
+                if device_id:
+
+                    last_ping[
+                        device_id
+                    ] = time.time()
 
                 await safe_send(
 
@@ -601,32 +763,46 @@ async def ws(ws: WebSocket):
                     f"mobile_{target}"
                 )
 
-                if mobile_ws:
+                if not mobile_ws:
 
-                    ok = await safe_send(
-
-                        mobile_ws,
-
-                        json.dumps({
-
-                            "type": "command",
-
-                            "action": action,
-
-                            "ts": ts,
-
-                            "sig": sig,
-
-                            "nonce": nonce
-                        })
+                    print(
+                        "❌ Mobile Offline"
                     )
 
-                    if ok:
+                    continue
 
-                        print(
-                            f"✅ Command Forwarded: "
-                            f"{action}"
-                        )
+                ok = await safe_send(
+
+                    mobile_ws,
+
+                    json.dumps({
+
+                        "type": "command",
+
+                        "action": action,
+
+                        "ts": ts,
+
+                        "sig": sig,
+
+                        "nonce": nonce
+                    })
+                )
+
+                if ok:
+
+                    print(
+                        f"✅ Command Forwarded: "
+                        f"{action}"
+                    )
+
+                else:
+
+                    print(
+                        "❌ Command Send Failed"
+                    )
+
+        # END LOOP
 
     except asyncio.TimeoutError:
 
@@ -653,34 +829,44 @@ async def ws(ws: WebSocket):
         # MOBILE CLEANUP
         # ==============================
 
-        if (
-            device_id
-            and
-            f"mobile_{device_id}" in clients
-        ):
+        if device_id:
 
-            del clients[
+            mobile_key = (
                 f"mobile_{device_id}"
-            ]
+            )
+
+            current_mobile = clients.get(
+                mobile_key
+            )
+
+            if current_mobile == ws:
+
+                clients.pop(
+                    mobile_key,
+                    None
+                )
 
         # ==============================
         # CAMERA CLEANUP
         # ==============================
 
-        if (
-            device_id
-            and
-            device_id in camera_streamers
-        ):
+        if device_id:
 
-            del camera_streamers[
+            current_camera = camera_streamers.get(
                 device_id
-            ]
-
-            print(
-                f"\n📷 Camera Removed: "
-                f"{device_id}"
             )
+
+            if current_camera == ws:
+
+                camera_streamers.pop(
+                    device_id,
+                    None
+                )
+
+                print(
+                    f"\n📷 Camera Removed: "
+                    f"{device_id}"
+                )
 
         # ==============================
         # VIEWER CLEANUP
@@ -707,6 +893,11 @@ async def ws(ws: WebSocket):
             print(
                 "\n👁️ Viewer Removed"
             )
+
+        try:
+            await ws.close()
+        except:
+            pass
 
         print(
             f"\n📊 Mobiles: {len(clients)} | "
