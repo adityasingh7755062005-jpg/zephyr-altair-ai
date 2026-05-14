@@ -6,6 +6,7 @@
 # FIXED COMMAND DELIVERY VERSION
 # FIXED AUTO RECONNECT VERSION
 # FINAL HEARTBEAT STABLE VERSION
+# FINAL COMMAND STABLE VERSION
 # ==============================
 
 import asyncio
@@ -60,6 +61,9 @@ class CloudClient:
         self.last_ping = 0
 
         self.send_lock = None
+
+        self.receive_task = None
+        self.ping_task = None
 
         print(
             "☁️ Cloud client initializing..."
@@ -124,6 +128,10 @@ class CloudClient:
                     max_queue=None
                 )
 
+                # ==============================
+                # RESET STATE
+                # ==============================
+
                 self.websocket = ws
 
                 self.connected = True
@@ -164,28 +172,34 @@ class CloudClient:
                 # START TASKS
                 # ==============================
 
-                receive_task = asyncio.create_task(
+                self.receive_task = asyncio.create_task(
                     self._receive_loop(ws)
                 )
 
-                ping_task = asyncio.create_task(
+                self.ping_task = asyncio.create_task(
                     self._ping_loop(ws)
                 )
 
                 done, pending = await asyncio.wait(
 
                     [
-                        receive_task,
-                        ping_task
+                        self.receive_task,
+                        self.ping_task
                     ],
 
                     return_when=
                     asyncio.FIRST_COMPLETED
                 )
 
+                # ==============================
+                # CANCEL REMAINING TASKS
+                # ==============================
+
                 for task in pending:
 
                     task.cancel()
+
+                for task in pending:
 
                     try:
                         await task
@@ -206,6 +220,33 @@ class CloudClient:
                 self.connection.update_cloud(
                     False
                 )
+
+                # ==============================
+                # CLEAN TASKS
+                # ==============================
+
+                for task in [
+
+                    self.receive_task,
+                    self.ping_task
+
+                ]:
+
+                    if task:
+
+                        task.cancel()
+
+                        try:
+                            await task
+                        except:
+                            pass
+
+                self.receive_task = None
+                self.ping_task = None
+
+                # ==============================
+                # CLOSE SOCKET
+                # ==============================
 
                 try:
 
@@ -240,12 +281,24 @@ class CloudClient:
 
             try:
 
+                # ==============================
+                # DEAD SOCKET CHECK
+                # ==============================
+
+                if ws != self.websocket:
+
+                    break
+
                 raw = await asyncio.wait_for(
 
                     ws.recv(),
 
                     timeout=PING_TIMEOUT
                 )
+
+                if not raw:
+
+                    continue
 
                 data = json.loads(raw)
 
@@ -265,9 +318,21 @@ class CloudClient:
                 # COMMAND
                 # ==============================
 
-                if msg_type == "command":
+                elif msg_type == "command":
+
+                    print(
+                        "📨 Cloud command packet received"
+                    )
 
                     await self._handle(data)
+
+                # ==============================
+                # UNKNOWN
+                # ==============================
+
+                else:
+
+                    pass
 
             except asyncio.TimeoutError:
 
@@ -327,6 +392,10 @@ class CloudClient:
             try:
 
                 if not self.connected:
+
+                    break
+
+                if ws != self.websocket:
 
                     break
 
@@ -409,6 +478,11 @@ class CloudClient:
 
                 return False
 
+            if self.websocket.closed:
+
+                self.connected = False
+                return False
+
             async with self.send_lock:
 
                 await self.websocket.send(
@@ -448,134 +522,144 @@ class CloudClient:
         data
     ):
 
-        action = data.get("action")
+        try:
 
-        ts = data.get("ts")
+            action = data.get("action")
 
-        sig = data.get("sig")
+            ts = data.get("ts")
 
-        nonce = data.get("nonce")
+            sig = data.get("sig")
 
-        print("")
-        print(
-            f"📩 Command received "
-            f"(CLOUD): {action}"
-        )
+            nonce = data.get("nonce")
 
-        # ==============================
-        # VERIFY REQUEST
-        # ==============================
+            print("")
+            print(
+                f"📩 Command received "
+                f"(CLOUD): {action}"
+            )
 
-        valid, msg = verify_request(
+            # ==============================
+            # VERIFY REQUEST
+            # ==============================
 
-            action,
+            valid, msg = verify_request(
 
-            ts,
+                action,
 
-            DEVICE_ID,
+                ts,
 
-            sig,
+                DEVICE_ID,
 
-            nonce
-        )
+                sig,
 
-        if not valid:
+                nonce
+            )
+
+            if not valid:
+
+                print(
+                    f"❌ CLOUD REJECTED: "
+                    f"{msg}"
+                )
+
+                return
 
             print(
-                f"❌ CLOUD REJECTED: "
-                f"{msg}"
+                "✅ Cloud command verified"
             )
 
-            return
+            # ==============================
+            # LOCK
+            # ==============================
 
-        print(
-            "✅ Cloud command verified"
-        )
+            if action == "lock":
 
-        # ==============================
-        # LOCK
-        # ==============================
+                print(
+                    "[Control] 🔒 Lock (CLOUD)"
+                )
 
-        if action == "lock":
+                self.core.lock()
+
+            # ==============================
+            # UNLOCK
+            # ==============================
+
+            elif action == "unlock":
+
+                print(
+                    "[Control] 🔓 Unlock (CLOUD)"
+                )
+
+                self.core.unlock()
+
+            # ==============================
+            # START CAMERA
+            # ==============================
+
+            elif action == "start_live_camera":
+
+                print(
+                    "[Control] 📷 Start Camera "
+                    "(CLOUD)"
+                )
+
+                result = (
+                    self.core
+                    .start_live_camera()
+                )
+
+                print(
+                    f"📷 Camera Running: "
+                    f"{result}"
+                )
+
+            # ==============================
+            # STOP CAMERA
+            # ==============================
+
+            elif action == "stop_live_camera":
+
+                print(
+                    "[Control] 🛑 Stop Camera "
+                    "(CLOUD)"
+                )
+
+                self.core.stop_live_camera()
+
+            # ==============================
+            # CAMERA STATUS
+            # ==============================
+
+            elif action == "camera_status":
+
+                running = (
+                    self.core
+                    .is_camera_running()
+                )
+
+                print(
+                    f"[Control] 📷 Camera Status: "
+                    f"{running}"
+                )
+
+            # ==============================
+            # UNKNOWN
+            # ==============================
+
+            else:
+
+                print(
+                    f"⚠️ Unknown command: "
+                    f"{action}"
+                )
+
+        except Exception as e:
 
             print(
-                "[Control] 🔒 Lock (CLOUD)"
+                f"❌ Command handler error: {e}"
             )
 
-            self.core.lock()
-
-        # ==============================
-        # UNLOCK
-        # ==============================
-
-        elif action == "unlock":
-
-            print(
-                "[Control] 🔓 Unlock (CLOUD)"
-            )
-
-            self.core.unlock()
-
-        # ==============================
-        # START CAMERA
-        # ==============================
-
-        elif action == "start_live_camera":
-
-            print(
-                "[Control] 📷 Start Camera "
-                "(CLOUD)"
-            )
-
-            result = (
-                self.core
-                .start_live_camera()
-            )
-
-            print(
-                f"📷 Camera Running: "
-                f"{result}"
-            )
-
-        # ==============================
-        # STOP CAMERA
-        # ==============================
-
-        elif action == "stop_live_camera":
-
-            print(
-                "[Control] 🛑 Stop Camera "
-                "(CLOUD)"
-            )
-
-            self.core.stop_live_camera()
-
-        # ==============================
-        # CAMERA STATUS
-        # ==============================
-
-        elif action == "camera_status":
-
-            running = (
-                self.core
-                .is_camera_running()
-            )
-
-            print(
-                f"[Control] 📷 Camera Status: "
-                f"{running}"
-            )
-
-        # ==============================
-        # UNKNOWN
-        # ==============================
-
-        else:
-
-            print(
-                f"⚠️ Unknown command: "
-                f"{action}"
-            )
+            traceback.print_exc()
 
     # ==============================
     # SEND MESSAGE
