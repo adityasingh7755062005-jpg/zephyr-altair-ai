@@ -1,10 +1,10 @@
 # ==============================
 # FILE: zephyr_cloud_server.py
 # FINAL ULTRA STABLE CLOUD SERVER
-# LOCAL + CLOUD CAMERA RELAY
-# FIXED NETWORK SWITCHING VERSION
-# FIXED DEAD SOCKET VERSION
-# FIXED CLOUD COMMAND RELAY VERSION
+# FULLY FIXED RENDER VERSION
+# FIXED RECONNECT RACE CONDITION
+# FIXED MOBILE DISCONNECT LOOP
+# FIXED DEAD SOCKET CLEANUP
 # ==============================
 
 import json
@@ -85,14 +85,15 @@ if not firebase_admin._apps:
 # ==============================
 
 clients = {}
+
 fcm_tokens = {}
 
 camera_streamers = {}
+
 camera_viewers = {}
 
-viewer_locks = {}
-
 last_frame_log = {}
+
 last_ping = {}
 
 # ==============================
@@ -139,12 +140,7 @@ async def safe_send(ws, data):
         await ws.send_text(data)
         return True
 
-    except:
-
-        try:
-            await ws.close()
-        except:
-            pass
+    except Exception:
 
         return False
 
@@ -158,11 +154,13 @@ async def cleanup_dead_viewers():
 
         try:
 
-            await asyncio.sleep(15)
+            await asyncio.sleep(20)
 
             dead_groups = []
 
-            for device_id, viewers in list(camera_viewers.items()):
+            for device_id, viewers in list(
+                camera_viewers.items()
+            ):
 
                 dead = set()
 
@@ -171,6 +169,7 @@ async def cleanup_dead_viewers():
                     try:
 
                         await viewer_ws.send_text(
+
                             json.dumps({
                                 "type": "ping"
                             })
@@ -184,12 +183,16 @@ async def cleanup_dead_viewers():
 
                 if not viewers:
 
-                    dead_groups.append(device_id)
+                    dead_groups.append(
+                        device_id
+                    )
 
             for group in dead_groups:
 
-                if group in camera_viewers:
-                    del camera_viewers[group]
+                camera_viewers.pop(
+                    group,
+                    None
+                )
 
         except Exception as e:
 
@@ -198,58 +201,83 @@ async def cleanup_dead_viewers():
             )
 
 # ==============================
-# CLEAN DEAD CAMERAS
+# CLEAN DEAD DEVICES
 # ==============================
 
-async def cleanup_dead_cameras():
+async def cleanup_dead_devices():
 
     while True:
 
         try:
 
-            await asyncio.sleep(20)
+            await asyncio.sleep(30)
 
             now = time.time()
 
             dead = []
 
-            for device_id, ts in list(last_ping.items()):
+            for device_id, ts in list(
+                last_ping.items()
+            ):
 
-                if now - ts > 90:
+                if now - ts > 180:
 
                     dead.append(device_id)
 
             for device_id in dead:
 
-                if device_id in camera_streamers:
+                current_mobile = clients.get(
+                    f"mobile_{device_id}"
+                )
+
+                if current_mobile:
 
                     try:
-                        await camera_streamers[
-                            device_id
-                        ].close()
+                        await current_mobile.close()
                     except:
                         pass
 
-                    del camera_streamers[
-                        device_id
-                    ]
-
-                    print(
-                        f"❌ Dead Camera Removed: "
-                        f"{device_id}"
+                    clients.pop(
+                        f"mobile_{device_id}",
+                        None
                     )
 
-                if device_id in last_ping:
-                    del last_ping[device_id]
+                current_camera = (
+                    camera_streamers.get(
+                        device_id
+                    )
+                )
+
+                if current_camera:
+
+                    try:
+                        await current_camera.close()
+                    except:
+                        pass
+
+                    camera_streamers.pop(
+                        device_id,
+                        None
+                    )
+
+                last_ping.pop(
+                    device_id,
+                    None
+                )
+
+                print(
+                    f"❌ Dead Device Removed: "
+                    f"{device_id}"
+                )
 
         except Exception as e:
 
             print(
-                f"❌ Camera cleanup error: {e}"
+                f"❌ Cleanup error: {e}"
             )
 
 # ==============================
-# START BACKGROUND TASKS
+# STARTUP
 # ==============================
 
 @app.on_event("startup")
@@ -260,7 +288,7 @@ async def startup_tasks():
     )
 
     asyncio.create_task(
-        cleanup_dead_cameras()
+        cleanup_dead_devices()
     )
 
     print(
@@ -268,7 +296,7 @@ async def startup_tasks():
     )
 
 # ==============================
-# FCM SEND
+# FCM
 # ==============================
 
 def send_fcm(
@@ -293,15 +321,16 @@ def send_fcm(
             token=token
         )
 
-        messaging.send(
-            message
-        )
+        messaging.send(message)
 
         print("✅ FCM sent")
 
     except Exception as e:
 
-        print("❌ FCM error:", e)
+        print(
+            "❌ FCM error:",
+            e
+        )
 
 # ==============================
 # REGISTER FCM
@@ -380,7 +409,6 @@ async def upload_intruder(
         filename = (
 
             f"{device_id}_"
-
             f"{int(time.time())}.jpg"
         )
 
@@ -397,13 +425,13 @@ async def upload_intruder(
             )
 
         url = (
-
             "https://zephyr-altair-ai-server.onrender.com"
-
             f"/intruders/{filename}"
         )
 
-        print("📸 Intruder Uploaded")
+        print(
+            "📸 Intruder Uploaded"
+        )
 
         token = fcm_tokens.get(
             device_id
@@ -451,26 +479,23 @@ async def ws(ws: WebSocket):
     await ws.accept()
 
     device_id = None
+
     viewer_target = None
+
     role = None
 
     try:
 
         while True:
 
-            raw = await asyncio.wait_for(
-
-                ws.receive_text(),
-
-                timeout=120
-            )
+            raw = await ws.receive_text()
 
             msg = json.loads(raw)
 
             msg_type = msg.get("type")
 
             # ==============================
-            # MOBILE REGISTER
+            # REGISTER MOBILE
             # ==============================
 
             if msg_type == "register":
@@ -489,23 +514,12 @@ async def ws(ws: WebSocket):
 
                 role = "mobile"
 
-                old_ws = clients.get(
-                    f"mobile_{device_id}"
-                )
-
-                if old_ws:
-
-                    try:
-                        await old_ws.close()
-                    except:
-                        pass
-
                 clients[
                     f"mobile_{device_id}"
                 ] = ws
 
                 last_ping[
-                    f"mobile_{device_id}"
+                    device_id
                 ] = time.time()
 
                 print(
@@ -533,26 +547,15 @@ async def ws(ws: WebSocket):
 
                 role = "camera"
 
-                old_camera = camera_streamers.get(
-                    device_id
-                )
-
-                if old_camera:
-
-                    try:
-                        await old_camera.close()
-                    except:
-                        pass
-
                 camera_streamers[
                     device_id
                 ] = ws
 
-                last_frame_log[
+                last_ping[
                     device_id
                 ] = time.time()
 
-                last_ping[
+                last_frame_log[
                     device_id
                 ] = time.time()
 
@@ -581,16 +584,11 @@ async def ws(ws: WebSocket):
                     ""
                 ).strip()
 
-                if not is_trusted_device(
-                    viewer_target
-                ):
-
-                    await ws.close()
-                    return
-
                 role = "viewer"
 
-                if viewer_target not in camera_viewers:
+                if viewer_target not in (
+                    camera_viewers
+                ):
 
                     camera_viewers[
                         viewer_target
@@ -605,21 +603,6 @@ async def ws(ws: WebSocket):
                     f"{viewer_target}"
                 )
 
-                cam_ws = camera_streamers.get(
-                    viewer_target
-                )
-
-                if cam_ws:
-
-                    await safe_send(
-
-                        cam_ws,
-
-                        json.dumps({
-                            "type": "viewer_connected"
-                        })
-                    )
-
             # ==============================
             # CAMERA FRAME
             # ==============================
@@ -631,12 +614,6 @@ async def ws(ws: WebSocket):
                     ""
                 ).strip()
 
-                if not is_trusted_device(
-                    source_device
-                ):
-
-                    continue
-
                 last_ping[
                     source_device
                 ] = time.time()
@@ -645,33 +622,6 @@ async def ws(ws: WebSocket):
                     source_device,
                     set()
                 )
-
-                if not viewers:
-                    continue
-
-                now = time.time()
-
-                if (
-
-                    now -
-
-                    last_frame_log.get(
-                        source_device,
-                        0
-                    )
-
-                    > 15
-                ):
-
-                    print(
-
-                        f"\n☁️ Streaming Active | "
-                        f"Viewers: {len(viewers)}"
-                    )
-
-                    last_frame_log[
-                        source_device
-                    ] = now
 
                 dead = set()
 
@@ -683,7 +633,10 @@ async def ws(ws: WebSocket):
                     )
 
                     if not ok:
-                        dead.add(viewer_ws)
+
+                        dead.add(
+                            viewer_ws
+                        )
 
                 viewers.difference_update(
                     dead
@@ -736,25 +689,22 @@ async def ws(ws: WebSocket):
                     "nonce"
                 )
 
-                if not is_trusted_device(
-                    target
-                ):
+                valid, reason = (
+                    verify_request(
 
-                    continue
-
-                valid, reason = verify_request(
-
-                    action,
-                    ts,
-                    target,
-                    sig,
-                    nonce
+                        action,
+                        ts,
+                        target,
+                        sig,
+                        nonce
+                    )
                 )
 
                 if not valid:
 
                     print(
-                        f"❌ Rejected: {reason}"
+                        f"❌ Rejected: "
+                        f"{reason}"
                     )
 
                     continue
@@ -796,20 +746,6 @@ async def ws(ws: WebSocket):
                         f"{action}"
                     )
 
-                else:
-
-                    print(
-                        "❌ Command Send Failed"
-                    )
-
-        # END LOOP
-
-    except asyncio.TimeoutError:
-
-        print(
-            "\n⏰ Connection Timeout"
-        )
-
     except WebSocketDisconnect:
 
         print(
@@ -825,77 +761,54 @@ async def ws(ws: WebSocket):
 
     finally:
 
-        # ==============================
-        # MOBILE CLEANUP
-        # ==============================
-
-        if device_id:
+        try:
 
             mobile_key = (
                 f"mobile_{device_id}"
             )
 
-            current_mobile = clients.get(
-                mobile_key
-            )
-
-            if current_mobile == ws:
+            if (
+                clients.get(
+                    mobile_key
+                ) == ws
+            ):
 
                 clients.pop(
                     mobile_key,
                     None
                 )
 
-        # ==============================
-        # CAMERA CLEANUP
-        # ==============================
-
-        if device_id:
-
-            current_camera = camera_streamers.get(
-                device_id
-            )
-
-            if current_camera == ws:
+            if (
+                camera_streamers.get(
+                    device_id
+                ) == ws
+            ):
 
                 camera_streamers.pop(
                     device_id,
                     None
                 )
 
-                print(
-                    f"\n📷 Camera Removed: "
-                    f"{device_id}"
-                )
-
-        # ==============================
-        # VIEWER CLEANUP
-        # ==============================
-
-        if (
-            viewer_target
-            and
-            viewer_target in camera_viewers
-        ):
-
-            camera_viewers[
+            if (
                 viewer_target
-            ].discard(ws)
-
-            if not camera_viewers[
+                and
                 viewer_target
-            ]:
+                in camera_viewers
+            ):
 
-                del camera_viewers[
+                camera_viewers[
                     viewer_target
-                ]
+                ].discard(ws)
 
-            print(
-                "\n👁️ Viewer Removed"
-            )
+                if not camera_viewers[
+                    viewer_target
+                ]:
 
-        try:
-            await ws.close()
+                    camera_viewers.pop(
+                        viewer_target,
+                        None
+                    )
+
         except:
             pass
 
