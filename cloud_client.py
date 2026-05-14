@@ -7,6 +7,7 @@
 # FIXED AUTO RECONNECT VERSION
 # FINAL HEARTBEAT STABLE VERSION
 # FINAL COMMAND STABLE VERSION
+# FIXED WEBSOCKETS VERSION COMPATIBILITY
 # ==============================
 
 import asyncio
@@ -470,18 +471,25 @@ class CloudClient:
 
         try:
 
-            if (
-                not self.websocket
-                or
-                not self.connected
-            ):
+            # ==============================
+            # SOCKET EXISTS
+            # ==============================
+
+            if not self.websocket:
 
                 return False
 
-            if self.websocket.closed:
+            # ==============================
+            # CONNECTION ACTIVE
+            # ==============================
 
-                self.connected = False
+            if not self.connected:
+
                 return False
+
+            # ==============================
+            # SEND DATA
+            # ==============================
 
             async with self.send_lock:
 
