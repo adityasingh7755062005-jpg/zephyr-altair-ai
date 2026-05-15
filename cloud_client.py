@@ -1,11 +1,8 @@
 # ==============================
 # FILE: cloud_client.py
-# FINAL ULTRA STABLE CLOUD CLIENT
-# FIXED DEAD SOCKETS
-# FIXED RANDOM MISSED COMMANDS
-# FIXED RECONNECT LOOP
-# FIXED RENDER SLEEP WAKE
-# FIXED STALE WEBSOCKET ISSUE
+# FULL CLOUD CAMERA CONTROL VERSION
+# FINAL STABLE CLOUD VERSION
+# FIXED RECONNECT + PING VERSION
 # ==============================
 
 import asyncio
@@ -17,6 +14,9 @@ import time
 
 from network.security import verify_request
 
+# ==============================
+# SETTINGS
+# ==============================
 
 DEVICE_ID = "160c02a2018e7132"
 
@@ -25,9 +25,12 @@ CLOUD_URL = (
 )
 
 RECONNECT_DELAY = 3
-PING_INTERVAL = 20
-PING_TIMEOUT = 90
 
+PING_INTERVAL = 15
+
+# ==============================
+# CLOUD CLIENT
+# ==============================
 
 class CloudClient:
 
@@ -38,20 +41,20 @@ class CloudClient:
     ):
 
         self.core = core
+
         self.connection = connection
 
         self.running = True
+
         self.connected = False
 
         self.websocket = None
 
+        self.loop = None
+
         self.last_pong = time.time()
-        self.last_ping = 0
 
-        self.send_lock = None
-
-        self.receive_task = None
-        self.ping_task = None
+        self.connection_lock = asyncio.Lock()
 
         print(
             "☁️ Cloud client initializing..."
@@ -65,36 +68,38 @@ class CloudClient:
 
         ).start()
 
-    # ==========================
-    # THREAD
-    # ==========================
+    # ==============================
+    # START LOOP
+    # ==============================
 
     def _start(self):
 
         try:
 
             asyncio.run(
-                self._main_loop()
+                self._loop()
             )
 
-        except Exception:
+        except Exception as e:
+
+            print(
+                f"❌ Cloud thread crashed: {e}"
+            )
 
             traceback.print_exc()
 
-    # ==========================
+    # ==============================
     # MAIN LOOP
-    # ==========================
+    # ==============================
 
-    async def _main_loop(self):
-
-        self.send_lock = asyncio.Lock()
+    async def _loop(self):
 
         while self.running:
 
             try:
 
                 print(
-                    "🌐 Connecting..."
+                    "🌐 Connecting to cloud..."
                 )
 
                 ws = await websockets.connect(
@@ -105,447 +110,391 @@ class CloudClient:
 
                     ping_timeout=None,
 
-                    close_timeout=10,
+                    close_timeout=5,
 
                     max_size=None,
 
                     max_queue=None
                 )
 
-                self.websocket = ws
-                self.connected = True
+                async with self.connection_lock:
 
-                self.last_pong = time.time()
+                    self.websocket = ws
+
+                    self.connected = True
 
                 self.connection.update_cloud(
                     True
                 )
 
-                ok = await self._safe_send_raw({
+                # ==============================
+                # REGISTER DEVICE
+                # ==============================
 
-                    "type":
-                        "register",
+                register_payload = {
 
-                    "device_id":
-                        DEVICE_ID,
+                    "type": "register",
 
-                    "role":
-                        "desktop"
+                    "device_id": DEVICE_ID
+                }
 
-                })
-
-                if not ok:
-
-                    raise Exception(
-                        "register failed"
+                await ws.send(
+                    json.dumps(
+                        register_payload
                     )
+                )
 
                 print(
-                    "✅ Cloud connected"
+                    f"✅ Connected as "
+                    f"{DEVICE_ID}"
                 )
 
-                self.receive_task = (
+                # ==============================
+                # START TASKS
+                # ==============================
 
-                    asyncio.create_task(
-
-                        self._receive_loop(
-                            ws
-                        )
-                    )
+                receive_task = asyncio.create_task(
+                    self._receive_loop(ws)
                 )
 
-                self.ping_task = (
-
-                    asyncio.create_task(
-
-                        self._ping_loop(
-                            ws
-                        )
-                    )
+                ping_task = asyncio.create_task(
+                    self._ping_loop(ws)
                 )
 
-                done, pending = (
+                done, pending = await asyncio.wait(
 
-                    await asyncio.wait(
+                    [
+                        receive_task,
+                        ping_task
+                    ],
 
-                        [
-
-                            self.receive_task,
-
-                            self.ping_task
-
-                        ],
-
-                        return_when=
-
-                        asyncio
-                        .FIRST_COMPLETED
-                    )
+                    return_when=asyncio.FIRST_COMPLETED
                 )
 
-                for t in pending:
+                for task in pending:
 
-                    t.cancel()
+                    task.cancel()
 
             except Exception as e:
 
                 print(
-                    f"❌ Lost: {e}"
+                    f"❌ Cloud connection lost: "
+                    f"{e}"
                 )
 
             finally:
 
-                self.connected = False
-
-                self.connection.update_cloud(
-                    False
-                )
-
-                for t in [
-
-                    self.receive_task,
-
-                    self.ping_task
-
-                ]:
-
-                    if t:
-
-                        t.cancel()
-
                 try:
 
-                    if self.websocket:
+                    async with self.connection_lock:
 
-                        await self.websocket.close()
+                        self.connected = False
+
+                        self.connection.update_cloud(
+                            False
+                        )
+
+                        if self.websocket:
+
+                            try:
+
+                                await self.websocket.close()
+
+                            except:
+                                pass
+
+                        self.websocket = None
 
                 except:
                     pass
 
-                self.websocket = None
-
                 print(
-                    f"🔄 Retry "
-                    f"{RECONNECT_DELAY}s"
+                    f"🔄 Reconnecting in "
+                    f"{RECONNECT_DELAY}s..."
                 )
 
                 await asyncio.sleep(
-
                     RECONNECT_DELAY
                 )
 
-    # ==========================
-    # RECEIVE
-    # ==========================
+    # ==============================
+    # RECEIVE LOOP
+    # ==============================
 
     async def _receive_loop(
-
         self,
-
         ws
-
     ):
 
         while self.running:
 
             try:
 
-                if (
-
-                    ws != self.websocket
-
-                    or
-
-                    not self.connected
-
-                ):
-
-                    break
-
-                raw = (
-
-                    await asyncio.wait_for(
-
-                        ws.recv(),
-
-                        timeout=
-                        PING_TIMEOUT
-                    )
-                )
-
-                if not raw:
-
-                    continue
+                raw = await ws.recv()
 
                 data = json.loads(raw)
 
-                msg = data.get(
-                    "type"
-                )
+                msg_type = data.get("type")
 
-                if msg == "pong":
+                # ==============================
+                # PONG
+                # ==============================
 
-                    self.last_pong = (
+                if msg_type == "pong":
 
-                        time.time()
-                    )
+                    self.last_pong = time.time()
 
                     continue
 
-                elif msg == "command":
+                # ==============================
+                # HANDLE COMMAND
+                # ==============================
 
-                    await self._handle(
-                        data
-                    )
-
-            except asyncio.TimeoutError:
-
-                print(
-                    "❌ Timeout"
-                )
-
-                self.connected = False
-
-                break
+                await self._handle(data)
 
             except websockets.ConnectionClosed:
 
-                self.connected = False
+                print(
+                    "❌ Cloud websocket closed"
+                )
 
                 break
 
-            except:
+            except Exception as e:
+
+                print(
+                    f"❌ Cloud receive error: "
+                    f"{e}"
+                )
 
                 traceback.print_exc()
 
                 await asyncio.sleep(1)
 
-    # ==========================
-    # PING
-    # ==========================
+    # ==============================
+    # PING LOOP
+    # ==============================
 
     async def _ping_loop(
-
         self,
-
         ws
-
     ):
 
         while self.running:
 
             try:
 
-                if (
+                ping_payload = {
 
-                    not self.connected
+                    "type": "ping",
 
-                    or
+                    "device_id": DEVICE_ID,
 
-                    ws != self.websocket
-
-                ):
-
-                    break
-
-                now = time.time()
-
-                if (
-
-                    now -
-
-                    self.last_pong
-
-                    >
-
-                    PING_TIMEOUT
-
-                ):
-
-                    print(
-                        "❌ Pong timeout"
+                    "timestamp": int(
+                        time.time()
                     )
+                }
 
-                    self.connected = False
-
-                    break
-
-                ok = (
-
-                    await self
-                    ._safe_send_raw({
-
-                        "type":
-                            "ping",
-
-                        "device_id":
-                            DEVICE_ID,
-
-                        "timestamp":
-                            int(now)
-
-                    })
+                await ws.send(
+                    json.dumps(
+                        ping_payload
+                    )
                 )
 
-                if not ok:
+            except Exception as e:
 
-                    break
-
-                self.last_ping = now
-
-            except:
-
-                self.connected = False
+                print(
+                    f"❌ Cloud ping failed: "
+                    f"{e}"
+                )
 
                 break
 
             await asyncio.sleep(
-
                 PING_INTERVAL
             )
 
-    # ==========================
-    # SEND
-    # ==========================
+    # ==============================
+    # HANDLE COMMANDS
+    # ==============================
 
-    async def _safe_send_raw(
-
+    async def _handle(
         self,
+        data
+    ):
 
+        if data.get("type") != "command":
+            return
+
+        action = data.get("action")
+
+        ts = data.get("ts")
+
+        sig = data.get("sig")
+
+        nonce = data.get("nonce")
+
+        print("")
+        print(
+            f"📩 Command received "
+            f"(CLOUD): {action}"
+        )
+
+        # ==============================
+        # VERIFY
+        # ==============================
+
+        valid, msg = verify_request(
+
+            action,
+
+            ts,
+
+            DEVICE_ID,
+
+            sig,
+
+            nonce
+        )
+
+        if not valid:
+
+            print(
+                f"❌ CLOUD REJECTED: "
+                f"{msg}"
+            )
+
+            return
+
+        print(
+            "✅ Cloud command verified"
+        )
+
+        # ==============================
+        # LOCK
+        # ==============================
+
+        if action == "lock":
+
+            print(
+                "[Control] 🔒 Lock (CLOUD)"
+            )
+
+            self.core.lock()
+
+        # ==============================
+        # UNLOCK
+        # ==============================
+
+        elif action == "unlock":
+
+            print(
+                "[Control] 🔓 Unlock (CLOUD)"
+            )
+
+            self.core.unlock()
+
+        # ==============================
+        # START LIVE CAMERA
+        # ==============================
+
+        elif action == "start_live_camera":
+
+            print(
+                "[Control] 📷 Start Camera "
+                "(CLOUD)"
+            )
+
+            result = (
+                self.core
+                .start_live_camera()
+            )
+
+            print(
+                f"📷 Camera Running: "
+                f"{result}"
+            )
+
+        # ==============================
+        # STOP LIVE CAMERA
+        # ==============================
+
+        elif action == "stop_live_camera":
+
+            print(
+                "[Control] 🛑 Stop Camera "
+                "(CLOUD)"
+            )
+
+            self.core.stop_live_camera()
+
+        # ==============================
+        # CAMERA STATUS
+        # ==============================
+
+        elif action == "camera_status":
+
+            running = (
+                self.core
+                .is_camera_running()
+            )
+
+            print(
+                f"[Control] 📷 Camera Status: "
+                f"{running}"
+            )
+
+        # ==============================
+        # UNKNOWN COMMAND
+        # ==============================
+
+        else:
+
+            print(
+                f"⚠️ Unknown command: "
+                f"{action}"
+            )
+
+    # ==============================
+    # SEND RAW MESSAGE
+    # ==============================
+
+    async def send(
+        self,
         payload
-
     ):
 
         try:
 
             if (
-
-                not self.websocket
-
-                or
-
-                not self.connected
-
+                self.websocket
+                and
+                self.connected
             ):
-
-                return False
-
-            async with self.send_lock:
 
                 await self.websocket.send(
-
-                    json.dumps(
-                        payload
-                    )
+                    json.dumps(payload)
                 )
 
-            return True
+                return True
 
-        except:
-
-            self.connected = False
-
-            return False
-
-    # ==========================
-    # COMMANDS
-    # ==========================
-
-    async def _handle(
-
-        self,
-
-        data
-
-    ):
-
-        try:
-
-            action = data.get(
-                "action"
-            )
-
-            ts = data.get("ts")
-            sig = data.get("sig")
-            nonce = data.get("nonce")
-
-            valid,msg = verify_request(
-
-                action,
-
-                ts,
-
-                DEVICE_ID,
-
-                sig,
-
-                nonce
-            )
-
-            if not valid:
-
-                print(
-                    f"❌ Reject "
-                    f"{msg}"
-                )
-
-                return
+        except Exception as e:
 
             print(
-                f"📩 {action}"
+                f"❌ Cloud send failed: "
+                f"{e}"
             )
 
-            if action == "lock":
+        return False
 
-                self.core.lock()
-
-            elif action == "unlock":
-
-                self.core.unlock()
-
-            elif (
-
-                action ==
-
-                "start_live_camera"
-            ):
-
-                self.core.start_live_camera()
-
-            elif (
-
-                action ==
-
-                "stop_live_camera"
-            ):
-
-                self.core.stop_live_camera()
-
-        except:
-
-            traceback.print_exc()
-
-    async def send(
-
-        self,
-
-        payload
-
-    ):
-
-        return await (
-
-            self._safe_send_raw(
-                payload
-            )
-        )
+    # ==============================
+    # STOP CLIENT
+    # ==============================
 
     def stop(self):
 
         self.running = False
 
-        self.connected = False
-
         print(
-            "☁️ Cloud stopped"
+            "☁️ Cloud client stopped"
         )

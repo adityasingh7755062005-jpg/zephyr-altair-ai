@@ -1,31 +1,13 @@
 # ==============================
 # FILE: network/connection_manager.py
-# FINAL ULTRA STABLE HYBRID VERSION
-# FIXED NETWORK SWITCHING
-# FIXED CLOUD FAILOVER
-# FIXED RANDOM OFFLINE BUG
-# LOW LOG VERSION
+# FINAL STABLE HYBRID VERSION
+# LOCAL + CLOUD FAILOVER SYSTEM
 # ==============================
 
 import time
 import threading
 import requests
 
-# ==============================
-# SETTINGS
-# ==============================
-
-LOCAL_TIMEOUT = 2
-
-LOCAL_MAX_LATENCY = 300
-
-MONITOR_INTERVAL = 5
-
-SHOW_LOGS = False
-
-# ==============================
-# CONNECTION MANAGER
-# ==============================
 
 class ConnectionManager:
 
@@ -35,15 +17,13 @@ class ConnectionManager:
         # LOCAL
         # ==============================
 
-        self.LOCAL_URL = (
-            "http://127.0.0.1:5001"
-        )
-
         self.local_latency = 999
 
         self.local_alive = False
 
-        self.last_local_success = 0
+        self.LOCAL_URL = (
+            "http://127.0.0.1:5001"
+        )
 
         # ==============================
         # CLOUD
@@ -60,7 +40,7 @@ class ConnectionManager:
         self.current_mode = "OFFLINE"
 
         # ==============================
-        # THREAD LOCK
+        # LOCK
         # ==============================
 
         self.lock = threading.Lock()
@@ -78,7 +58,7 @@ class ConnectionManager:
         ).start()
 
     # ==============================
-    # PING LOCAL SERVER
+    # PING LOCAL
     # ==============================
 
     def _ping_local(self):
@@ -89,48 +69,35 @@ class ConnectionManager:
 
             response = requests.get(
 
-                f"{self.LOCAL_URL}/ping",
+                f"{self.LOCAL_URL}/",
 
-                timeout=LOCAL_TIMEOUT
+                timeout=1
             )
 
             latency = int(
-
-                (time.time() - start)
-
-                * 1000
+                (time.time() - start) * 1000
             )
 
             if response.status_code == 200:
 
-                with self.lock:
+                self.local_latency = latency
 
-                    self.local_latency = latency
-
-                    self.local_alive = True
-
-                    self.last_local_success = (
-                        time.time()
-                    )
+                self.local_alive = True
 
             else:
-
-                with self.lock:
-
-                    self.local_latency = 999
-
-                    self.local_alive = False
-
-        except:
-
-            with self.lock:
 
                 self.local_latency = 999
 
                 self.local_alive = False
 
+        except:
+
+            self.local_latency = 999
+
+            self.local_alive = False
+
     # ==============================
-    # UPDATE CLOUD STATUS
+    # UPDATE CLOUD
     # ==============================
 
     def update_cloud(
@@ -149,7 +116,7 @@ class ConnectionManager:
                 )
 
     # ==============================
-    # GET BEST CONNECTION
+    # BEST CONNECTION
     # ==============================
 
     def get_best(self):
@@ -166,8 +133,7 @@ class ConnectionManager:
 
                 and
 
-                self.local_latency
-                <= LOCAL_MAX_LATENCY
+                self.local_latency < 150
 
             ):
 
@@ -203,23 +169,15 @@ class ConnectionManager:
 
             return {
 
-                "mode":
-                self.current_mode,
+                "mode": self.current_mode,
 
-                "local_alive":
-                self.local_alive,
+                "local_alive": self.local_alive,
 
-                "local_latency":
-                self.local_latency,
+                "local_latency": self.local_latency,
 
-                "cloud_alive":
-                self.cloud_alive,
+                "cloud_alive": self.cloud_alive,
 
-                "cloud_last_seen":
-                self.cloud_last_seen,
-
-                "last_local_success":
-                self.last_local_success
+                "cloud_last_seen": self.cloud_last_seen
             }
 
     # ==============================
@@ -228,56 +186,28 @@ class ConnectionManager:
 
     def _monitor(self):
 
-        previous_mode = None
-
         while True:
 
             try:
 
-                # ==============================
-                # CHECK LOCAL
-                # ==============================
-
                 self._ping_local()
-
-                # ==============================
-                # GET BEST MODE
-                # ==============================
 
                 mode = self.get_best()
 
-                # ==============================
-                # LOG ONLY ON CHANGE
-                # ==============================
+                print(
 
-                if (
+                    f"[Connection] "
+                    f"Mode={mode} | "
+                    f"Local={self.local_alive} "
+                    f"({self.local_latency}ms) | "
+                    f"Cloud={self.cloud_alive}"
 
-                    SHOW_LOGS
-
-                    and
-
-                    mode != previous_mode
-                ):
-
-                    print(
-
-                        f"[Connection] "
-                        f"Mode={mode} | "
-                        f"Local={self.local_alive} "
-                        f"({self.local_latency}ms) | "
-                        f"Cloud={self.cloud_alive}"
-
-                    )
-
-                    previous_mode = mode
+                )
 
             except Exception as e:
 
                 print(
-                    f"[Connection] "
-                    f"Monitor Error: {e}"
+                    f"[Connection] Monitor Error: {e}"
                 )
 
-            time.sleep(
-                MONITOR_INTERVAL
-            )
+            time.sleep(3)
