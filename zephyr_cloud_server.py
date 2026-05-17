@@ -148,36 +148,27 @@ def send_fcm(
 
         )
 
-        messaging.send(msg)
+        response = messaging.send(
+            msg
+        )
+
+        print(
+
+            "✅ Firebase sent:",
+
+            response
+
+        )
 
     except Exception as e:
 
-        print(e)
+        print(
 
+            "❌ Firebase failed:",
 
-@app.post("/register_fcm")
-async def register_fcm(
-        data: dict
-):
+            e
 
-    device = data.get(
-        "device_id",
-        ""
-    )
-
-    token = data.get(
-        "fcm_token",
-        ""
-    )
-
-    fcm_tokens[
-        device
-    ] = token
-
-    return {
-        "status": "ok"
-    }
-
+        )
 
 # ==============================
 # INTRUDER
@@ -193,6 +184,10 @@ async def upload_intruder(
 ):
 
     try:
+
+        print(
+            f"🚨 Upload from {device_id}"
+        )
 
         filename = (
 
@@ -220,22 +215,92 @@ async def upload_intruder(
                 f
             )
 
+        image_url = (
+
+            "https://zephyr-altair-ai-server.onrender.com"
+
+            +
+
+            f"/intruders/{filename}"
+
+        )
+
+        print(
+            "📸 Saved:",
+            image_url
+        )
+
+        token = fcm_tokens.get(
+            device_id
+        )
+
+        print(
+            "📱 Token:",
+            token
+        )
+
+        if token:
+
+            send_fcm(
+
+                token,
+
+                "🚨 Intruder Alert",
+
+                "Tap to open image",
+
+                {
+
+                    "type":
+                        "intruder",
+
+                    "image_url":
+                        image_url,
+
+                    "time":
+                        time.strftime("%H:%M"),
+
+                    "date":
+                        time.strftime("%d/%m/%Y"),
+
+                    "activity":
+                        "Movement detected"
+
+                }
+
+            )
+
+            print(
+                "✅ FCM sent"
+            )
+
+        else:
+
+            print(
+                "❌ No FCM token"
+            )
+
         return {
 
             "status":
-                "ok"
+                "ok",
 
+            "url":
+                image_url
         }
 
-    except:
+    except Exception as e:
+
+        print(
+            "❌ Upload error:",
+            e
+        )
 
         return {
 
             "status":
                 "error"
-
         }
-
 
 # ==============================
 # WEBSOCKET
