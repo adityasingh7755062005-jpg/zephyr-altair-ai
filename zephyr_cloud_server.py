@@ -370,6 +370,10 @@ async def ws(
                 "type"
             )
 
+            # ==========================
+            # REGISTER
+            # ==========================
+
             if msg_type == "register":
 
                 device_id = msg.get(
@@ -401,5 +405,117 @@ async def ws(
                         device_id
                     ] = socket
 
-    except:
-        pass
+                print(
+                    f"✅ Cloud connected as {role}: {device_id}"
+                )
+
+            # ==========================
+            # COMMAND ROUTING
+            # ==========================
+
+            elif msg_type == "command":
+
+                target = msg.get(
+                    "target"
+                )
+
+                action = msg.get(
+                    "action"
+                )
+
+                target_ws = desktop_clients.get(
+                    target
+                )
+
+                if target_ws:
+
+                    ok = await safe_send(
+
+                        target_ws,
+
+                        json.dumps({
+
+                            "type":
+                                "command",
+
+                            "action":
+                                action
+
+                        })
+
+                    )
+
+                    if ok:
+
+                        print(
+                            f"✅ Routed: {action}"
+                        )
+
+                    else:
+
+                        print(
+                            "❌ Send failed"
+                        )
+
+                else:
+
+                    print(
+                        "❌ Desktop offline"
+                    )
+
+            # ==========================
+            # PING
+            # ==========================
+
+            elif msg_type == "ping":
+
+                await safe_send(
+
+                    socket,
+
+                    json.dumps({
+
+                        "type":
+                            "pong"
+
+                    })
+
+                )
+
+    except asyncio.TimeoutError:
+
+        print(
+            "⏰ Timeout"
+        )
+
+    except WebSocketDisconnect:
+
+        print(
+            "⚠ Disconnect"
+        )
+
+    except Exception as e:
+
+        print(
+            "❌",
+            e
+        )
+
+    finally:
+
+        if device_id:
+
+            mobile_clients.pop(
+                device_id,
+                None
+            )
+
+            desktop_clients.pop(
+                device_id,
+                None
+            )
+
+        print(
+            "🔌 Closed:",
+            device_id
+        )
