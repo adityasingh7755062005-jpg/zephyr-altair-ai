@@ -7,6 +7,7 @@
 
 import json
 import os
+import socket
 import time
 import shutil
 import asyncio
@@ -350,18 +351,14 @@ async def ws(
 
     device_id = None
     role = None
-    viewer_target = None
 
     try:
 
         while True:
 
             raw = await asyncio.wait_for(
-
                 socket.receive_text(),
-
                 timeout=90
-
             )
 
             msg = json.loads(raw)
@@ -410,7 +407,7 @@ async def ws(
                 )
 
             # ==========================
-            # COMMAND ROUTING
+            # COMMAND
             # ==========================
 
             elif msg_type == "command":
@@ -421,6 +418,18 @@ async def ws(
 
                 action = msg.get(
                     "action"
+                )
+
+                print(
+                    f"📨 CLOUD CMD -> {action}"
+                )
+
+                print(
+                    f"🎯 target={target}"
+                )
+
+                print(
+                    f"💻 desktops={list(desktop_clients.keys())}"
                 )
 
                 target_ws = desktop_clients.get(
@@ -460,7 +469,7 @@ async def ws(
                 else:
 
                     print(
-                        "❌ Desktop offline"
+                        f"❌ Desktop offline: {target}"
                     )
 
             # ==========================
