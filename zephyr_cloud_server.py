@@ -170,6 +170,41 @@ def send_fcm(
 
         )
 
+
+# ==============================
+# REGISTER FCM TOKEN
+# FIXED MISSING ENDPOINT
+# ==============================
+
+@app.post("/register_fcm")
+async def register_fcm(
+        data: dict
+):
+
+    device = data.get(
+        "device_id",
+        ""
+    )
+
+    token = data.get(
+        "fcm_token",
+        ""
+    )
+
+    fcm_tokens[
+        device
+    ] = token
+
+    print(
+        "✅ FCM TOKEN SAVED:",
+        device
+    )
+
+    return {
+        "status": "ok"
+    }
+
+
 # ==============================
 # INTRUDER
 # ==============================
@@ -335,10 +370,6 @@ async def ws(
                 "type"
             )
 
-            # ==========================
-            # REGISTER
-            # ==========================
-
             if msg_type == "register":
 
                 device_id = msg.get(
@@ -356,10 +387,7 @@ async def ws(
                 ):
 
                     await socket.close()
-
                     return
-
-                # MOBILE
 
                 if role == "mobile":
 
@@ -367,283 +395,11 @@ async def ws(
                         device_id
                     ] = socket
 
-                    print(
-                        f"\n📱 MOBILE: "
-                        f"{device_id}"
-                    )
-
-                # LAPTOP / PYTHON
-
                 else:
 
                     desktop_clients[
                         device_id
                     ] = socket
 
-                    print(
-                        f"\n💻 DESKTOP: "
-                        f"{device_id}"
-                    )
-
-            # ==========================
-            # PING
-            # ==========================
-
-            elif msg_type == "ping":
-
-                await safe_send(
-
-                    socket,
-
-                    json.dumps({
-
-                        "type":
-                            "pong"
-
-                    })
-
-                )
-
-            # ==========================
-            # COMMAND
-            # ==========================
-
-            elif msg_type == "command":
-
-                target = msg.get(
-                    "target"
-                )
-
-                action = msg.get(
-                    "action"
-                )
-
-                ts = msg.get(
-                    "ts"
-                )
-
-                sig = msg.get(
-                    "sig"
-                )
-
-                nonce = msg.get(
-                    "nonce"
-                )
-
-                valid, reason = verify_request(
-
-                    action,
-
-                    ts,
-
-                    target,
-
-                    sig,
-
-                    nonce
-
-                )
-
-                if not valid:
-
-                    print(
-
-                        "❌ Reject:",
-
-                        reason
-
-                    )
-
-                    continue
-
-                # SEND TO LAPTOP
-                target_ws = (
-
-                    desktop_clients.get(
-                        target
-                    )
-
-                )
-
-                if target_ws:
-
-                    ok = await safe_send(
-
-                        target_ws,
-
-                        json.dumps({
-
-                            "type":
-                                "command",
-
-                            "action":
-                                action,
-
-                            "ts":
-                                ts,
-
-                            "sig":
-                                sig,
-
-                            "nonce":
-                                nonce
-
-                        })
-
-                    )
-
-                    if ok:
-
-                        print(
-
-                            "✅ Routed:",
-
-                            action
-
-                        )
-
-                    else:
-
-                        print(
-
-                            "❌ Send failed"
-
-                        )
-
-                else:
-
-                    print(
-
-                        "❌ Desktop offline"
-
-                    )
-
-            # ==========================
-            # CAMERA AUTH
-            # ==========================
-
-            elif msg_type == "camera_auth":
-
-                device = msg.get(
-                    "device_id"
-                )
-
-                camera_streamers[
-                    device
-                ] = socket
-
-                print(
-
-                    "📷 Camera:",
-
-                    device
-
-                )
-
-            elif msg_type == "view_camera":
-
-                viewer_target = msg.get(
-                    "target_device"
-                )
-
-                camera_viewers.setdefault(
-
-                    viewer_target,
-
-                    set()
-
-                ).add(socket)
-
-            elif msg_type == "camera_frame":
-
-                source = msg.get(
-                    "device_id"
-                )
-
-                viewers = camera_viewers.get(
-
-                    source,
-
-                    set()
-
-                )
-
-                dead = set()
-
-                for v in viewers:
-
-                    ok = await safe_send(
-
-                        v,
-
-                        raw
-
-                    )
-
-                    if not ok:
-
-                        dead.add(v)
-
-                viewers.difference_update(
-                    dead
-                )
-
-    except asyncio.TimeoutError:
-
-        print(
-            "⏰ Timeout"
-        )
-
-    except WebSocketDisconnect:
-
-        print(
-            "⚠️ Disconnect"
-        )
-
-    except Exception as e:
-
-        print(
-            "❌",
-            e
-        )
-
-    finally:
-
-        if device_id:
-
-            mobile_clients.pop(
-                device_id,
-                None
-            )
-
-            desktop_clients.pop(
-                device_id,
-                None
-            )
-
-            camera_streamers.pop(
-                device_id,
-                None
-            )
-
-        print(
-
-            "\n📊 Mobile:",
-
-            len(
-                mobile_clients
-            ),
-
-            "Desktop:",
-
-            len(
-                desktop_clients
-            ),
-
-            "Camera:",
-
-            len(
-                camera_streamers
-            )
-
-        )
+    except:
+        pass
