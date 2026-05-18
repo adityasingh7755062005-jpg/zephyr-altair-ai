@@ -393,153 +393,109 @@ class CloudClient:
     # HANDLE COMMANDS
     # ==============================
 
-    async def _handle(
+async def _handle(
 
-            self,
+        self,
 
-            data
+        data
+
+):
+
+    if data.get(
+            "type"
+    ) != "command":
+
+        return
+
+    action = data.get(
+        "action"
+    )
+
+    print(
+
+        f"\n📩 CLOUD CMD: "
+
+        f"{action}"
+
+    )
+
+    print(
+        "✅ Accepted"
+    )
+
+    # LOCK
+
+    if action == "lock":
+
+        self.core.lock()
+
+    # UNLOCK
+
+    elif action == "unlock":
+
+        self.core.unlock()
+
+    # CAMERA START
+
+    elif (
+
+            action
+
+            ==
+
+            "start_live_camera"
 
     ):
 
-        if data.get(
-                "type"
-        ) != "command":
+        result = (
 
-            return
+            self.core
+            .start_live_camera()
 
-        action = data.get(
-            "action"
         )
 
-        ts = data.get(
-            "ts"
-        )
+        print(result)
 
-        sig = data.get(
-            "sig"
-        )
+    # CAMERA STOP
 
-        nonce = data.get(
-            "nonce"
-        )
+    elif (
+
+            action
+
+            ==
+
+            "stop_live_camera"
+
+    ):
+
+        self.core.stop_live_camera()
+
+    elif (
+
+            action
+
+            ==
+
+            "camera_status"
+
+    ):
 
         print(
 
-            f"\n📩 CLOUD CMD: "
-
-            f"{action}"
-
-        )
-
-        valid, msg = (
-
-            verify_request(
-
-                action,
-
-                ts,
-
-                DEVICE_ID,
-
-                sig,
-
-                nonce
-
-            )
+            self.core
+            .is_camera_running()
 
         )
 
-        if not valid:
-
-            print(
-
-                "❌ Reject:",
-
-                msg
-
-            )
-
-            return
+    else:
 
         print(
-            "✅ Verified"
+
+            "⚠️ Unknown:",
+
+            action
+
         )
-
-        # LOCK
-
-        if action == "lock":
-
-            self.core.lock()
-
-        # UNLOCK
-
-        elif action == "unlock":
-
-            self.core.unlock()
-
-        # CAMERA START
-
-        elif (
-
-                action
-
-                ==
-
-                "start_live_camera"
-
-        ):
-
-            result = (
-
-                self.core
-                .start_live_camera()
-
-            )
-
-            print(
-                result
-            )
-
-        # CAMERA STOP
-
-        elif (
-
-                action
-
-                ==
-
-                "stop_live_camera"
-
-        ):
-
-            self.core.stop_live_camera()
-
-        elif (
-
-                action
-
-                ==
-
-                "camera_status"
-
-        ):
-
-            print(
-
-                self.core
-                .is_camera_running()
-
-            )
-
-        else:
-
-            print(
-
-                "⚠️ Unknown:",
-
-                action
-
-            )
 
     # ==============================
     # SEND RAW
