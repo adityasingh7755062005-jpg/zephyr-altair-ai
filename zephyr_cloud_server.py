@@ -536,23 +536,58 @@ async def ws(
                     )
 
 
-            # ==========================
-            # CAMERA FRAME RELAY
-            # ==========================
+             # ==========================
+             # CAMERA FRAME RELAY
+             # ==========================
 
             elif msg_type == "camera_frame":
 
-                frame = raw
+             frame = msg.get(
+               "frame",
+             ""
+    )
 
-                for viewer_id, viewer_ws in list(
-                    camera_viewers.items()
-                ):
+             payload = json.dumps({
 
-                    await safe_send(
-                        viewer_ws,
-                        frame
-                    )
+                 "type": 
+                 "camera_frame",
 
+                "frame":
+                frame
+
+        })
+
+             dead_viewers = []
+
+             for viewer_id, viewer_ws in list(
+            camera_viewers.items()
+    ):
+
+                ok = await safe_send(
+            viewer_ws,
+            payload
+        )
+
+            if not ok:
+
+             dead_viewers.append(
+                viewer_id
+            )
+
+             for x in dead_viewers:
+
+              camera_viewers.pop(
+            x,
+            None
+        )
+
+              print(
+
+        f"📷 Relayed -> "
+
+        f"{len(camera_viewers)} viewers"
+
+    )
 
             # ==========================
             # PING
