@@ -25,6 +25,7 @@ from fastapi.staticfiles import StaticFiles
 
 import firebase_admin
 from firebase_admin import credentials, messaging
+from wasabi import msg
 
 from network.security import verify_request
 
@@ -471,6 +472,88 @@ async def ws(
                     print(
                         f"❌ Desktop offline: {target}"
                     )
+
+            # ==========================
+            # CAMERA AUTH
+            # ==========================
+
+            elif msg_type == "camera_auth":
+
+                device_id = msg.get(
+                    "device_id"
+                )
+
+                camera_streamers[
+                    device_id
+                ] = socket
+
+                print(
+                    f"📷 Camera registered: {device_id}"
+                )
+
+
+            # ==========================
+            # VIEW CAMERA
+            # ==========================
+
+            elif msg_type == "view_camera":
+
+                target = msg.get(
+                    "target_device"
+                )
+
+                viewer = msg.get(
+                    "viewer_device"
+                )
+
+                camera_viewers[
+                    viewer
+                ] = socket
+
+                streamer = camera_streamers.get(
+                    target
+                )
+
+                if streamer:
+
+                    await safe_send(
+
+                        streamer,
+
+                        json.dumps({
+
+                            "type":
+                                "viewer_connected",
+
+                            "viewer":
+                                viewer
+
+                        })
+
+                    )
+
+                    print(
+                        f"👁 Viewer connected -> {target}"
+                    )
+
+
+            # ==========================
+            # CAMERA FRAME RELAY
+            # ==========================
+
+            elif msg_type == "camera_frame":
+
+                frame = raw
+
+                for viewer_id, viewer_ws in list(
+                    camera_viewers.items()
+                ):
+
+                    await safe_send(
+                        viewer_ws,
+                        frame
+                    )
+
 
             # ==========================
             # PING
