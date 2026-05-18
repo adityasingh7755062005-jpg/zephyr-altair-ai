@@ -25,7 +25,6 @@ from fastapi.staticfiles import StaticFiles
 
 import firebase_admin
 from firebase_admin import credentials, messaging
-from wasabi import msg
 
 from network.security import verify_request
 
