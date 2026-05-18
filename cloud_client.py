@@ -393,109 +393,110 @@ class CloudClient:
     # HANDLE COMMANDS
     # ==============================
 
-async def _handle(
+    async def _handle(
 
-        self,
+            self,
 
-        data
-
-):
-
-    if data.get(
-            "type"
-    ) != "command":
-
-        return
-
-    action = data.get(
-        "action"
-    )
-
-    print(
-
-        f"\n📩 CLOUD CMD: "
-
-        f"{action}"
-
-    )
-
-    print(
-        "✅ Accepted"
-    )
-
-    # LOCK
-
-    if action == "lock":
-
-        self.core.lock()
-
-    # UNLOCK
-
-    elif action == "unlock":
-
-        self.core.unlock()
-
-    # CAMERA START
-
-    elif (
-
-            action
-
-            ==
-
-            "start_live_camera"
+            data
 
     ):
 
-        result = (
+        if data.get(
+                "type"
+        ) != "command":
 
-            self.core
-            .start_live_camera()
+            return
 
+        action = data.get(
+            "action"
         )
-
-        print(result)
-
-    # CAMERA STOP
-
-    elif (
-
-            action
-
-            ==
-
-            "stop_live_camera"
-
-    ):
-
-        self.core.stop_live_camera()
-
-    elif (
-
-            action
-
-            ==
-
-            "camera_status"
-
-    ):
 
         print(
 
-            self.core
-            .is_camera_running()
+            f"\n📩 CLOUD CMD: "
+
+            f"{action}"
 
         )
-
-    else:
 
         print(
-
-            "⚠️ Unknown:",
-
-            action
-
+            "✅ Accepted"
         )
+
+        # LOCK
+
+        if action == "lock":
+
+            self.core.lock()
+
+        # UNLOCK
+
+        elif action == "unlock":
+
+            self.core.unlock()
+
+        # CAMERA START
+
+        elif (
+
+                action
+
+                ==
+
+                "start_live_camera"
+
+        ):
+
+            result = (
+
+                self.core
+                .start_live_camera()
+
+            )
+
+            print(result)
+
+        # CAMERA STOP
+
+        elif (
+
+                action
+
+                ==
+
+                "stop_live_camera"
+
+        ):
+
+            self.core.stop_live_camera()
+
+        elif (
+
+                action
+
+                ==
+
+                "camera_status"
+
+        ):
+
+            print(
+
+                self.core
+                .is_camera_running()
+
+            )
+
+        else:
+
+            print(
+
+                "⚠️ Unknown:",
+
+                action
+
+            )
+
 
     # ==============================
     # SEND RAW
@@ -521,14 +522,10 @@ async def _handle(
 
             ):
 
-                await (
+                await self.websocket.send(
 
-                    self.websocket.send(
-
-                        json.dumps(
-                            payload
-                        )
-
+                    json.dumps(
+                        payload
                     )
 
                 )
@@ -538,6 +535,7 @@ async def _handle(
         except Exception as e:
 
             print(
+                "❌ Send:",
                 e
             )
 
