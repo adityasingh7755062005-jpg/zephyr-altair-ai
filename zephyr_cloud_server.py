@@ -152,6 +152,7 @@ async def register_fcm(
 
 # ==========================
 # UPLOAD INTRUDER
+# SEND FCM AFTER UPLOAD
 # ==========================
 
 @app.post("/upload_intruder")
@@ -163,48 +164,122 @@ async def upload_intruder(
 
 ):
 
-    filename = (
+    try:
 
-        f"{device_id}_"
+        filename = (
 
-        f"{int(time.time())}.jpg"
+            f"{device_id}_"
 
-    )
+            f"{int(time.time())}.jpg"
 
-    path = os.path.join(
-        UPLOAD_DIR,
-        filename
-    )
-
-    with open(
-            path,
-            "wb"
-    ) as f:
-
-        shutil.copyfileobj(
-            file.file,
-            f
         )
 
-    url = (
+        path = os.path.join(
+            UPLOAD_DIR,
+            filename
+        )
 
-        "https://zephyr-altair-ai-server.onrender.com"
+        with open(
+                path,
+                "wb"
+        ) as f:
 
-        +
+            shutil.copyfileobj(
+                file.file,
+                f
+            )
 
-        f"/intruders/{filename}"
+        image_url = (
 
-    )
+            "https://zephyr-altair-ai-server.onrender.com"
 
-    return {
+            +
 
-        "status":
-            "ok",
+            f"/intruders/{filename}"
 
-        "url":
-            url
-    }
+        )
 
+        print(
+            "📷 Saved:",
+            image_url
+        )
+
+        token = fcm_tokens.get(
+            device_id
+        )
+
+        print(
+            "TOKEN:",
+            token
+        )
+
+        # ======================
+        # SEND FIREBASE
+        # ======================
+
+        if token:
+
+            msg = messaging.Message(
+
+                token=token,
+
+                data={
+
+                    "type":
+                        "intruder",
+
+                    "image_url":
+                        image_url,
+
+                    "time":
+                        time.strftime("%H:%M"),
+
+                    "date":
+                        time.strftime("%d/%m/%Y"),
+
+                    "activity":
+                        "Movement detected"
+
+                }
+
+            )
+
+            response = messaging.send(
+                msg
+            )
+
+            print(
+                "✅ FCM sent:",
+                response
+            )
+
+        else:
+
+            print(
+                "❌ No FCM token"
+            )
+
+        return {
+
+            "status":
+                "ok",
+
+            "url":
+                image_url
+        }
+
+    except Exception as e:
+
+        print(
+            "UPLOAD ERROR:",
+            e
+        )
+
+        return {
+
+            "status":
+                "error"
+        }
 
 # ==========================
 # WEBSOCKET
