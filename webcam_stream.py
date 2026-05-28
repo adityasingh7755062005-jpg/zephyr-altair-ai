@@ -2,6 +2,7 @@
 # FILE: webcam_stream.py
 # FINAL STABLE CAMERA STREAM
 # ULTRA STABLE VERSION
+# FIXED FREEZE + RECONNECT ISSUE
 # ==============================
 
 import sys
@@ -46,7 +47,8 @@ FRAME_DELAY = 0.12
 
 camera = None
 
-connected_clients = set()
+# FIXED:
+connected_clients = []
 
 cloud_ws = None
 cloud_connected = False
@@ -200,13 +202,20 @@ async def safe_cloud_send(
 
         async with cloud_send_lock:
 
-            await cloud_ws.send(
-                payload
+            # FIXED:
+            await asyncio.wait_for(
+
+                cloud_ws.send(
+                    payload
+                ),
+
+                timeout=0.5
+
             )
 
             return True
 
-    except:
+    except Exception:
 
         cloud_connected = False
 
@@ -270,9 +279,9 @@ async def cloud_connection_loop():
 
                 CLOUD_URI,
 
-                ping_interval=None,
+                ping_interval=20,
 
-                ping_timeout=None,
+                ping_timeout=20,
 
                 max_size=None
 
@@ -396,12 +405,19 @@ async def stream_camera():
 
             dead = []
 
-            for ws in connected_clients:
+            # FIXED:
+            for ws in connected_clients[:]:
 
                 try:
 
-                    await ws.send(
-                        payload
+                    await asyncio.wait_for(
+
+                        ws.send(
+                            payload
+                        ),
+
+                        timeout=0.5
+
                     )
 
                 except:
@@ -412,9 +428,16 @@ async def stream_camera():
 
             for ws in dead:
 
-                connected_clients.discard(
-                    ws
-                )
+                try:
+
+                    if ws in connected_clients:
+
+                        connected_clients.remove(
+                            ws
+                        )
+
+                except:
+                    pass
 
             # ======================
             # CLOUD
@@ -446,28 +469,39 @@ async def stream_camera():
 
 async def handler(ws):
 
-    connected_clients.add(
-        ws
-    )
-
-    print(
-        "[WEBCAM] Local Viewer"
-    )
-
     try:
 
-        async for _ in ws:
+        # FIXED:
+        if ws not in connected_clients:
 
-            pass
+            connected_clients.append(
+                ws
+            )
+
+        print(
+            "[WEBCAM] Local Viewer"
+        )
+
+        # FIXED:
+        while True:
+
+            await asyncio.sleep(1)
 
     except:
         pass
 
     finally:
 
-        connected_clients.discard(
-            ws
-        )
+        try:
+
+            if ws in connected_clients:
+
+                connected_clients.remove(
+                    ws
+                )
+
+        except:
+            pass
 
 
 # ==============================
@@ -508,9 +542,9 @@ async def main():
 
         PORT,
 
-        ping_interval=None,
+        ping_interval=20,
 
-        ping_timeout=None,
+        ping_timeout=20,
 
         max_size=None
 
