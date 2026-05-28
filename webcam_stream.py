@@ -229,6 +229,8 @@ async def safe_cloud_send(
 async def cloud_receiver(ws):
 
     global cloud_connected
+    global camera_running
+    global camera
 
     try:
 
@@ -244,19 +246,57 @@ async def cloud_receiver(ws):
                     "type"
                 )
 
+                # ======================
+                # VIEWER CONNECTED
+                # ======================
+
                 if t == "viewer_connected":
 
                     print(
                         "[WEBCAM] Viewer Connected"
                     )
 
-            except:
-                pass
+                # ======================
+                # STOP CAMERA
+                # ======================
 
-    except:
+                elif t == "stop_camera":
+
+                    print(
+                        "[WEBCAM] STOP CAMERA RECEIVED"
+                    )
+
+                    camera_running = False
+
+                    try:
+
+                        if camera is not None:
+
+                            camera.release()
+
+                            camera = None
+
+                            print(
+                                "[WEBCAM] Camera Released"
+                            )
+
+                    except Exception as e:
+
+                        print(
+                            "[WEBCAM] Stop Error:",
+                            e
+                        )
+
+            except Exception as e:
+
+                print(
+                    "[WEBCAM] Receiver Error:",
+                    e
+                )
+
+    except Exception:
 
         cloud_connected = False
-
 
 # ==============================
 # CLOUD LOOP
