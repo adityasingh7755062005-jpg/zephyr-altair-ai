@@ -31,11 +31,11 @@ CLOUD_URI = (
 
 DEVICE_ID = "160c02a2018e7132"
 
-JPEG_QUALITY = 50
-FRAME_WIDTH = 640
-FRAME_HEIGHT = 360
+JPEG_QUALITY = 25
+FRAME_WIDTH = 320
+FRAME_HEIGHT = 240
 
-TARGET_FPS = 15
+TARGET_FPS = 8
 FRAME_DELAY = 1 / TARGET_FPS
 
 camera = None
@@ -272,9 +272,9 @@ async def cloud_connection_loop():
 
                 CLOUD_URI,
 
-                ping_interval=20,
+                ping_interval=None,
 
-                ping_timeout=20,
+                ping_timeout=None,
 
                 max_size=None
 
@@ -433,7 +433,7 @@ async def stream_camera():
                 )
 
             await asyncio.sleep(
-                FRAME_DELAY
+                0.12
             )
 
         except Exception as e:
@@ -500,16 +500,19 @@ async def main():
     ).start()
 
     await websockets.serve(
-
+       
         handler,
 
         HOST,
 
         PORT,
 
-        max_size=None
+        max_size=None,
 
-    )
+        ping_interval=None,
+
+        ping_timeout=None
+        )
 
     asyncio.create_task(
 
