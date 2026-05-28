@@ -1,7 +1,7 @@
 # ==============================
 # FILE: webcam_stream.py
-# FIXED CLOUD CAMERA STREAM
-# DEBUG VERSION
+# FINAL STABLE CAMERA STREAM
+# THREAD SAFE VERSION
 # ==============================
 
 import sys
@@ -20,6 +20,7 @@ import base64
 import json
 import time
 import traceback
+import threading
 
 HOST = "0.0.0.0"
 PORT = 8765
@@ -45,8 +46,14 @@ cloud_ws = None
 cloud_connected = False
 cloud_send_lock = None
 
-fps_counter = 0
-fps_timer = time.time()
+# ==============================
+# SHARED FRAME BUFFER
+# ==============================
+
+latest_frame = None
+frame_lock = threading.Lock()
+
+camera_running = True
 
 
 # ==============================
@@ -86,6 +93,11 @@ def initialize_camera():
             FRAME_HEIGHT
         )
 
+        camera.set(
+            cv2.CAP_PROP_BUFFERSIZE,
+            1
+        )
+
         print(
             "[WEBCAM] Camera Ready"
         )
@@ -97,6 +109,64 @@ def initialize_camera():
         print(e)
 
         return False
+
+
+# ==============================
+# CAMERA THREAD
+# ==============================
+
+def camera_capture_loop():
+
+    global latest_frame
+    global camera_running
+
+    print(
+        "[WEBCAM] Camera thread started"
+    )
+
+    while camera_running:
+
+        try:
+
+            if camera is None:
+
+                time.sleep(1)
+                continue
+
+            ok, frame = camera.read()
+
+            if not ok:
+
+                print(
+                    "[WEBCAM] Camera read failed"
+                )
+
+                time.sleep(0.1)
+                continue
+
+            frame = cv2.resize(
+
+                frame,
+
+                (
+                    FRAME_WIDTH,
+                    FRAME_HEIGHT
+                )
+
+            )
+
+            with frame_lock:
+
+                latest_frame = frame.copy()
+
+        except Exception as e:
+
+            print(
+                "[WEBCAM] Capture Error:",
+                e
+            )
+
+            time.sleep(1)
 
 
 # ==============================
@@ -202,9 +272,11 @@ async def cloud_connection_loop():
 
                 CLOUD_URI,
 
-                ping_interval=None,
+                ping_interval=20,
 
-                ping_timeout=None
+                ping_timeout=20,
+
+                max_size=None
 
             )
 
@@ -267,37 +339,22 @@ async def cloud_connection_loop():
 
 async def stream_camera():
 
-    global fps_counter
-    global fps_timer
-
     while True:
 
         try:
 
-            if camera is None:
+            frame = None
 
-                await asyncio.sleep(
-                    1
-                )
+            with frame_lock:
 
+                if latest_frame is not None:
+
+                    frame = latest_frame.copy()
+
+            if frame is None:
+
+                await asyncio.sleep(0.01)
                 continue
-
-            ok, frame = camera.read()
-
-            if not ok:
-
-                continue
-
-            frame = cv2.resize(
-
-                frame,
-
-                (
-                    FRAME_WIDTH,
-                    FRAME_HEIGHT
-                )
-
-            )
 
             ok, buffer = cv2.imencode(
 
@@ -319,6 +376,7 @@ async def stream_camera():
 
             if not ok:
 
+                await asyncio.sleep(0.01)
                 continue
 
             jpg = base64.b64encode(
@@ -338,7 +396,9 @@ async def stream_camera():
 
             })
 
+            # ======================
             # LOCAL VIEWERS
+            # ======================
 
             dead = []
 
@@ -362,19 +422,15 @@ async def stream_camera():
                     x
                 )
 
+            # ======================
             # CLOUD VIEWERS
+            # ======================
 
             if cloud_connected:
 
-                sent = await safe_cloud_send(
+                await safe_cloud_send(
                     payload
                 )
-
-                if sent:
-
-                    print(
-                        "[WEBCAM] Frame sent"
-                    )
 
             await asyncio.sleep(
                 FRAME_DELAY
@@ -383,6 +439,7 @@ async def stream_camera():
         except Exception as e:
 
             print(
+                "[WEBCAM] Stream Error:",
                 e
             )
 
@@ -430,13 +487,27 @@ async def main():
 
         return
 
+    # ==============================
+    # START CAMERA THREAD
+    # ==============================
+
+    threading.Thread(
+
+        target=camera_capture_loop,
+
+        daemon=True
+
+    ).start()
+
     await websockets.serve(
 
         handler,
 
         HOST,
 
-        PORT
+        PORT,
+
+        max_size=None
 
     )
 
@@ -450,6 +521,10 @@ async def main():
 
         stream_camera()
 
+    )
+
+    print(
+        "[WEBCAM] Server Ready"
     )
 
     await asyncio.Future()
@@ -467,6 +542,6 @@ if __name__ == "__main__":
 
         pass
 
-    except Exception as e:
+    except Exception:
 
         traceback.print_exc()
