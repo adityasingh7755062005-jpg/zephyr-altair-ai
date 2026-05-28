@@ -569,6 +569,10 @@ class Core18:
 
                             self.camera_process.kill()
 
+                            self.camera_process.wait(
+                                timeout=5
+                            )
+
                 except Exception as e:
 
                     print(
