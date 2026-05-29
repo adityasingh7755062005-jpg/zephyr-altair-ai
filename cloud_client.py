@@ -464,9 +464,11 @@ class CloudClient:
 
                 ==
 
-                "stop_live_camera"
-
+                "stop_camera"
+                
         ):
+            print("[Core 18] Stop camera Command received")
+            
 
             self.core.stop_live_camera()
 
