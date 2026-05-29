@@ -370,6 +370,16 @@ async def ws(
                     "device_id"
                 )
 
+                old_socket = camera_streamers.get(device_id
+       )
+                if old_socket:
+                    
+                    try:
+
+                        await old_socket.close()
+                    except:
+                        pass
+
                 camera_streamers[
                     device_id
                 ] = socket
@@ -622,7 +632,12 @@ async def ws(
                 None
             )
 
-            camera_streamers.pop(
+            if (
+                camera_streamers.get(device_id)
+                is socket
+            ):
+
+             camera_streamers.pop(
                 device_id,
                 None
             )

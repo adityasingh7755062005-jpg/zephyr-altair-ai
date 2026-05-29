@@ -264,18 +264,21 @@ async def cloud_receiver(ws):
 
 
                 elif t == "start_camera":
+                       
+                       global camera
+                       global latest_frame
 
-                  print(
-                         "[WEBCAM] START CAMERA RECEIVED"
-                )
+                       print(
+                           "[WEBCAM] START CAMERA RECEIVED"
+                       )
 
-                if camera is None:
+                       if camera is None:
 
-                 if initialize_camera():
+                         if initialize_camera():
 
-                  print(
-                "[WEBCAM] Camera Restarted"
-            )
+                          print(
+                               "[WEBCAM] Camera Restarted"
+                        )
 
                 # ======================
                 # STOP CAMERA
@@ -294,6 +297,8 @@ async def cloud_receiver(ws):
                         if camera is not None:
 
                             camera.release()
+
+                            time.sleep(1)
 
                             camera = None
 
