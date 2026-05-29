@@ -23,7 +23,6 @@ from fastapi.staticfiles import StaticFiles
 
 import firebase_admin
 from firebase_admin import credentials, messaging
-from wasabi import msg
 
 app = FastAPI()
 
@@ -517,17 +516,17 @@ async def ws(
                     # STOP CAMERA
                     # ======================
 
-            elif msg_type == "stop_camera":
+            elif msg_type =="stop_camera":
 
                 target =msg.get(
-        "target_device"
-            )
+                            "target_device"
+                       )
 
                 streamer = (
-        camera_streamers.get(
-            target
-        )
-    )
+                    camera_streamers.get(
+                   target
+                 )
+             )
 
                 if streamer:
 
