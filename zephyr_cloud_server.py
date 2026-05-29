@@ -23,6 +23,7 @@ from fastapi.staticfiles import StaticFiles
 
 import firebase_admin
 from firebase_admin import credentials, messaging
+from wasabi import msg
 
 app = FastAPI()
 
@@ -511,6 +512,41 @@ async def ws(
                         })
 
                     )
+
+                    # ======================
+                    # STOP CAMERA
+                    # ======================
+
+            elif msg_type == "stop_camera":
+
+                target =msg.get(
+        "target_device"
+            )
+
+                streamer = (
+        camera_streamers.get(
+            target
+        )
+    )
+
+                if streamer:
+
+                 await safe_send(
+
+            streamer,
+
+            json.dumps({
+
+                "type":
+                    "stop_camera"
+
+            })
+
+        )
+
+                 print(
+            "STOP CAMERA FORWARDED"
+        )
 
             # ======================
             # PING

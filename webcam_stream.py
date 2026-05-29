@@ -22,6 +22,7 @@ import json
 import time
 import traceback
 import threading
+import os 
 
 HOST = "0.0.0.0"
 PORT = 8765
@@ -266,8 +267,6 @@ async def cloud_receiver(ws):
                         "[WEBCAM] STOP CAMERA RECEIVED"
                     )
 
-                    camera_running = False
-
                     try:
 
                         if camera is not None:
@@ -286,6 +285,7 @@ async def cloud_receiver(ws):
                             "[WEBCAM] Stop Error:",
                             e
                         )
+                        os._exit(0)
 
             except Exception as e:
 
