@@ -256,12 +256,34 @@ async def cloud_receiver(ws):
                     print(
                         "[WEBCAM] Viewer Connected"
                     )
+                
+
+                # ======================
+                # START CAMERA SUPPORT
+                # ======================
+
+
+                elif t == "start_camera":
+
+                  print(
+                         "[WEBCAM] START CAMERA RECEIVED"
+                )
+
+                if camera is None:
+
+                 if initialize_camera():
+
+                  print(
+                "[WEBCAM] Camera Restarted"
+            )
 
                 # ======================
                 # STOP CAMERA
                 # ======================
 
                 elif t == "stop_camera":
+
+                    global latest_frame
 
                     print(
                         "[WEBCAM] STOP CAMERA RECEIVED"
@@ -275,6 +297,8 @@ async def cloud_receiver(ws):
 
                             camera = None
 
+                            latest_frame = None
+
                             print(
                                 "[WEBCAM] Camera Released"
                             )
@@ -285,7 +309,6 @@ async def cloud_receiver(ws):
                             "[WEBCAM] Stop Error:",
                             e
                         )
-                        os._exit(0)
 
             except Exception as e:
 

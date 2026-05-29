@@ -512,6 +512,36 @@ async def ws(
 
                     )
 
+
+                    # ======================
+                    # VIEWER CONNECTED
+                    # ======================
+
+                elif msg_type =="start_camera":
+                  
+                   target =msg.get( "target_device" )
+                     
+                streamer = ( 
+                      camera_streamers.get( target )   
+                     )
+                
+                if streamer: 
+
+                    await safe_send(
+                        streamer,
+
+                        json.dumps({
+
+                            "type":
+                                "start_camera"
+
+                        })
+                    )
+
+                    print(
+                        "START CAMERA FORWARDED"
+                    )
+
                     # ======================
                     # STOP CAMERA
                     # ======================
