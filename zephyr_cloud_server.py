@@ -514,7 +514,7 @@ async def ws(
 
 
                     # ======================
-                    # VIEWER CONNECTED
+                    # START CAMERA
                     # ======================
 
                 elif msg_type =="start_camera":
