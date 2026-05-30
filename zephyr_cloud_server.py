@@ -417,6 +417,21 @@ async def ws(
                     "viewer_device"
                 )
 
+                old_viewer_socket = camera_viewers.pop(
+                    viewer,
+                    None
+                )
+
+                if old_viewer_socket:
+
+                    try:
+
+                        await old_viewer_socket.close()
+
+                    except:
+
+                        pass
+
                 camera_viewers[
                     viewer
                 ] = socket
@@ -482,97 +497,103 @@ async def ws(
                         x,
                         None
                     )
-
-            # ======================
-            # COMMAND
-            # ======================
+                   # ======================
+                   # COMMAND
+                   # ======================
 
             elif msg_type == "command":
 
-                target = msg.get(
-                    "target"
-                )
+             target = msg.get(
+        "target"
+    )
 
-                action = msg.get(
-                    "action"
-                )
+            action = msg.get(
+        "action"
+    )
 
-                desktop = (
+            desktop = (
 
-                    desktop_clients.get(
-                        target
-                    )
-                )
+        desktop_clients.get(
+            target
+        )
+    )
 
-                if desktop:
+            if desktop:
 
-                    await safe_send(
+             await safe_send(
 
-                        desktop,
+            desktop,
 
-                        json.dumps({
+            json.dumps({
 
-                            "type":
-                                "command",
+                "type":
+                    "command",
 
-                            "action":
-                                action
+                "action":
+                    action
 
-                        })
+            })
 
-                    )
+        )
 
+                  # ======================
+                  # START CAMERA
+                  # ======================
 
-                    # ======================
-                    # START CAMERA
-                    # ======================
+            elif msg_type == "start_camera":
 
-                elif msg_type =="start_camera":
-                  
-                   target =msg.get( "target_device" )
-                     
-                streamer = ( 
-                      camera_streamers.get( target )   
-                     )
-                
-                if streamer: 
+             target = msg.get(
+        "target_device"
+    )
 
-                    await safe_send(
-                        streamer,
+            streamer = (
 
-                        json.dumps({
+        camera_streamers.get(
+            target
+        )
+    )
 
-                            "type":
-                                "start_camera"
+            if streamer:
 
-                        })
-                    )
-
-                    print(
-                        "START CAMERA FORWARDED"
-                    )
-
-                    # ======================
-                    # STOP CAMERA
-                    # ======================
-
-            elif msg_type =="stop_camera":
-
-                target =msg.get(
-                            "target_device"
-                       )
-
-                streamer = (
-                    camera_streamers.get(
-                   target
-                 )
-             )
-
-                if streamer:
-
-                 await safe_send(
+             await safe_send(
 
             streamer,
+
+            json.dumps({
+
+                "type":
+                    "start_camera"
+
+            })
+
+        )
+
+             print(
+            "START CAMERA FORWARDED"
+        )
+
+             # ======================
+             # STOP CAMERA
+             # ======================
+
+            elif msg_type == "stop_camera":
+
+             target = msg.get(
+                "target_device"
+    )
+
+            streamer = (
+
+                     camera_streamers.get(
+            target
+        )
+    )
+
+            if streamer:
+
+                       await safe_send(
+
+                     streamer,
 
             json.dumps({
 
@@ -583,17 +604,20 @@ async def ws(
 
         )
 
-                 print(
+                       print(
             "STOP CAMERA FORWARDED"
         )
 
+            
+            
+            
             # ======================
             # PING
             # ======================
 
             elif msg_type == "ping":
 
-                await safe_send(
+             await safe_send(
 
                     socket,
 

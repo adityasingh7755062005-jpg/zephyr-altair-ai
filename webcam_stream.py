@@ -137,17 +137,22 @@ def camera_capture_loop():
 
         try:
 
-            if camera is None:
+            cam = camera
 
-                time.sleep(1)
+            if cam is None:
+
+                time.sleep(0.1)
 
                 continue
 
-            ok, frame = camera.read()
+            ok, frame = cam.read()
 
             if not ok:
 
-                time.sleep(0.05)
+                print("[WEBCAM] Frame Read Failed"
+                )
+
+                time.sleep(0.02)
 
                 continue
 
@@ -186,6 +191,7 @@ async def safe_cloud_send(
 
     global cloud_ws
     global cloud_connected
+    global cloud_send_lock
 
     try:
 
@@ -232,20 +238,17 @@ async def cloud_receiver(ws):
     global cloud_connected
     global camera_running
     global camera
+    global latest_frame
 
     try:
 
         async for message in ws:
-
+            
             try:
-
-                data = json.loads(
-                    message
-                )
-
-                t = data.get(
-                    "type"
-                )
+                
+                data = json.loads(message)
+                t = data.get("type")
+                
 
                 # ======================
                 # VIEWER CONNECTED
@@ -256,28 +259,35 @@ async def cloud_receiver(ws):
                     print(
                         "[WEBCAM] Viewer Connected"
                     )
-                
 
                 # ======================
-                # START CAMERA SUPPORT
+                # START CAMERA
                 # ======================
-
 
                 elif t == "start_camera":
-                       
-                       global camera
-                       global latest_frame
 
-                       print(
-                           "[WEBCAM] START CAMERA RECEIVED"
-                       )
+                    print(
+                        "[WEBCAM] START CAMERA RECEIVED"
+                    )
 
-                       if camera is None:
+                    latest_frame = None
 
-                         if initialize_camera():
+                    temp = camera
+                    camera = None
 
-                          print(
-                               "[WEBCAM] Camera Restarted"
+                    if temp is not None:  
+                        
+                        try:
+                          temp.release()
+                        except:
+                              pass
+
+                    await asyncio.sleep(1)
+
+                    if initialize_camera():
+
+                        print(
+                            "[WEBCAM] Camera Restarted"
                         )
 
                 # ======================
@@ -286,21 +296,18 @@ async def cloud_receiver(ws):
 
                 elif t == "stop_camera":
 
-                    global latest_frame
-
                     print(
                         "[WEBCAM] STOP CAMERA RECEIVED"
                     )
 
                     try:
 
-                        if camera is not None:
+                        temp = camera
+                        camera = None
 
-                            camera.release()
+                        if temp is not None:
 
-                            time.sleep(1)
-
-                            camera = None
+                            temp.release()
 
                             latest_frame = None
 
@@ -317,14 +324,19 @@ async def cloud_receiver(ws):
 
             except Exception as e:
 
-                print(
-                    "[WEBCAM] Receiver Error:",
-                    e
-                )
+                    print(
+                        "[WEBCAM] Receiver Error:",
+                       
+                        e
+                 )
 
-    except Exception:
+    except Exception as e:
 
-        cloud_connected = False
+                           cloud_connected = False
+
+                           print(
+                               "[WEBCAM] Cloud Receiver Error:", e
+                               )
 
 # ==============================
 # CLOUD LOOP
