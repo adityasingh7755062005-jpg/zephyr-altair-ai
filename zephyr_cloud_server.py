@@ -323,16 +323,16 @@ async def ws(socket: WebSocket):
 
                 streamer = camera_streamers.get(target)
 
-            if streamer:
+                if streamer:
 
-                 await safe_send(
+                  await safe_send(
                      streamer, 
                      json.dumps({
                          "type": "start_camera"
                          })
                  )
 
-                 print("START CAMERA FORWARDED")
+                  print("START CAMERA FORWARDED")
 
                 # ======================
                 # STOP CAMERA
@@ -344,7 +344,7 @@ async def ws(socket: WebSocket):
 
                 streamer = camera_streamers.get(target)
 
-            if streamer:
+                if streamer:
 
                   await safe_send(
                       streamer, 
