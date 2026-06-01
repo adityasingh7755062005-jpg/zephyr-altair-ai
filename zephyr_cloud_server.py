@@ -302,16 +302,11 @@ async def ws(socket: WebSocket):
 
                 desktop = desktop_clients.get(target)
 
-                if desktop: 
+                if desktop:
 
-                     await safe_send(
-                          desktop, 
-                          json.dumps({
-                              "type":"command", 
-                              "action": action
-                              
-                          })
-                     )
+                    await safe_send(
+                        desktop, json.dumps({"type": "command", "action": action})
+                    )
 
                 # ======================
                 # START CAMERA
@@ -325,14 +320,9 @@ async def ws(socket: WebSocket):
 
                 if streamer:
 
-                  await safe_send(
-                     streamer, 
-                     json.dumps({
-                         "type": "start_camera"
-                         })
-                 )
+                    await safe_send(streamer, json.dumps({"type": "start_camera"}))
 
-                  print("START CAMERA FORWARDED")
+                    print("START CAMERA FORWARDED")
 
                 # ======================
                 # STOP CAMERA
@@ -346,14 +336,9 @@ async def ws(socket: WebSocket):
 
                 if streamer:
 
-                  await safe_send(
-                      streamer, 
-                      json.dumps({
-                          "type": "stop_camera"
-                          })
-                    )
+                    await safe_send(streamer, json.dumps({"type": "stop_camera"}))
 
-                  print("STOP CAMERA FORWARDED")
+                    print("STOP CAMERA FORWARDED")
 
             # ======================
             # PING
