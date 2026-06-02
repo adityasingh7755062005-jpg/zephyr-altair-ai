@@ -225,6 +225,12 @@ async def ws(socket: WebSocket):
 
                 device_id = msg.get("device_id")
 
+                if not trusted(device_id):
+
+                    await socket.close()
+
+                    return
+
                 old_socket = camera_streamers.pop(device_id, None)
                 if old_socket:
 
@@ -249,6 +255,12 @@ async def ws(socket: WebSocket):
                 target = msg.get("target_device")
 
                 viewer = msg.get("viewer_device")
+
+                if not trusted(viewer):
+                  
+                    await socket.close()
+
+                    return
 
                 old_viewer_socket = camera_viewers.pop(viewer, None)
 
@@ -339,6 +351,22 @@ async def ws(socket: WebSocket):
                     await safe_send(streamer, json.dumps({"type": "stop_camera"}))
 
                     print("STOP CAMERA FORWARDED")
+
+            elif msg_type == "stop_view_camera":
+
+                target = msg.get("viewer_device")
+
+                viewer_ws = camera_viewers.pop(target, None)
+
+                if viewer_ws:
+
+                    try:
+
+                        await viewer_ws.close()
+                    except:
+
+                        pass
+                    print("Viewer stopped camera")
 
             # ======================
             # PING

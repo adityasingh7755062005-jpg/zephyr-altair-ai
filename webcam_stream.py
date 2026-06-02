@@ -72,6 +72,15 @@ def initialize_camera():
 
     try:
 
+        if camera is not None:
+
+            try:
+                camera.release()
+            except:
+                pass
+            
+            cv2.destroyAllWindows()
+
         camera = cv2.VideoCapture(
             0,
             cv2.CAP_DSHOW
@@ -141,6 +150,8 @@ def camera_capture_loop():
 
             if cam is None:
 
+                latest_frame = None
+
                 time.sleep(0.1)
 
                 continue
@@ -149,10 +160,12 @@ def camera_capture_loop():
 
             if not ok:
 
+                latest_frame = None
+
                 print("[WEBCAM] Frame Read Failed"
                 )
 
-                time.sleep(0.02)
+                time.sleep(0.05)
 
                 continue
 
@@ -257,7 +270,7 @@ async def cloud_receiver(ws):
                 if t == "viewer_connected":
 
                     print(
-                        "[WEBCAM] Viewer Connected"
+                        "[WEBCAM] Viewer Connected - Stream Active"
                     )
 
                 # ======================
@@ -281,10 +294,14 @@ async def cloud_receiver(ws):
                           temp.release()
                         except:
                               pass
+                        
+                        cv2.destroyAllWindows()
 
-                    await asyncio.sleep(1)
+                    await asyncio.sleep(2)
 
                     if initialize_camera():
+
+                        latest_frame = None
 
                         print(
                             "[WEBCAM] Camera Restarted"
@@ -302,6 +319,8 @@ async def cloud_receiver(ws):
 
                     try:
 
+                        latest_frame = None
+
                         temp = camera
                         camera = None
 
@@ -309,11 +328,11 @@ async def cloud_receiver(ws):
 
                             temp.release()
 
-                            latest_frame = None
-
                             print(
                                 "[WEBCAM] Camera Released"
                             )
+
+                            cv2.destroyAllWindows()
 
                     except Exception as e:
 

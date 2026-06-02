@@ -277,14 +277,14 @@ class LocalServer:
                 )
 
         # ==============================
-        # START LIVE CAMERA
+        # START CAMERA
         # ==============================
 
         @self.app.api_route(
-            "/start_live_camera",
+            "/start_camera",
             methods=["GET", "POST"]
         )
-        async def start_live_camera(
+        async def start_camera(
             request: Request
         ):
 
@@ -352,14 +352,14 @@ class LocalServer:
                 )
 
         # ==============================
-        # STOP LIVE CAMERA
+        # STOP CAMERA
         # ==============================
 
         @self.app.api_route(
-            "/stop_live_camera",
+            "/stop_camera",
             methods=["GET", "POST"]
         )
-        async def stop_live_camera(
+        async def stop_camera(
             request: Request
         ):
 

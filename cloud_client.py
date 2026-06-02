@@ -13,8 +13,6 @@ import threading
 import traceback
 import time
 
-from network.security import verify_request
-
 # ==============================
 # SETTINGS
 # ==============================
@@ -437,12 +435,9 @@ class CloudClient:
 
         # CAMERA START
 
-        elif (
+        elif action in (
 
-                action
-
-                ==
-
+                "start_camera"
                 "start_live_camera"
 
         ):
@@ -458,12 +453,9 @@ class CloudClient:
 
         # CAMERA STOP
 
-        elif (
+        elif action in (
 
-                action
-
-                ==
-
+                "stop_live_camera" 
                 "stop_camera"
                 
         ):
@@ -553,6 +545,16 @@ class CloudClient:
         self.running = False
 
         self.connected = False
+
+        try:
+
+            if self.websocket:
+
+                asyncio.run(
+                    self.websocket.close()
+                )
+        except:
+            pass
 
         print(
             "☁️ Cloud stopped"

@@ -454,7 +454,7 @@ class Core18:
 
                 startup_ok = False
 
-                for _ in range(10):
+                for _ in range(5):
 
                     time.sleep(1)
 
@@ -643,11 +643,12 @@ class Core18:
 
         try:
 
-            print(
-                "[Core 18] 🧹 Cleaning up..."
-            )
-
             self.stop_live_camera()
+
+            try:
+                self.freeze_overlay.hide()
+            except:
+                pass
 
         except Exception as e:
 
