@@ -312,13 +312,24 @@ async def ws(socket: WebSocket):
                 target = msg.get("target")
                 action = msg.get("action")
 
+                print(f"SERVER CMD -> "
+                      f"target={target} "
+                      f"action={action}"
+                )
+
                 desktop = desktop_clients.get(target)
+
+                print(f"Desktop found = "
+                      f"{desktop is not None}"
+                )
 
                 if desktop:
 
                     await safe_send(
                         desktop, json.dumps({"type": "command", "action": action})
                     )
+
+                    print(f"Forwarded {action}")
 
                 # ======================
                 # START CAMERA

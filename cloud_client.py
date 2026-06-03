@@ -437,7 +437,7 @@ class CloudClient:
 
         elif action in (
 
-                "start_camera"
+                "start_camera",
                 "start_live_camera"
 
         ):
@@ -455,7 +455,7 @@ class CloudClient:
 
         elif action in (
 
-                "stop_live_camera" 
+                "stop_live_camera", 
                 "stop_camera"
                 
         ):
