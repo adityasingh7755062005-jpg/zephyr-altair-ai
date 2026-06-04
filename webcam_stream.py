@@ -252,10 +252,12 @@ async def cloud_receiver(ws):
     global camera_running
     global camera
     global latest_frame
+    global connected_clients
 
     try:
 
         async for message in ws:
+            
             
             try:
                 
@@ -272,6 +274,7 @@ async def cloud_receiver(ws):
                     print(
                         "[WEBCAM] Viewer Connected - Stream Active"
                     )
+                    
 
                 # ======================
                 # START CAMERA
@@ -297,7 +300,9 @@ async def cloud_receiver(ws):
                         
                         cv2.destroyAllWindows()
 
-                    await asyncio.sleep(2)
+                    print("[WEBCAM] Reinitializing Camera...")
+
+                    await asyncio.sleep(3)
 
                     if initialize_camera():
 
@@ -305,6 +310,12 @@ async def cloud_receiver(ws):
 
                         print(
                             "[WEBCAM] Camera Restarted"
+                        )
+
+                    else:
+
+                        print(
+                            "[WEBCAM] Camera Restart Failed "
                         )
 
                 # ======================
@@ -316,37 +327,27 @@ async def cloud_receiver(ws):
                     print(
                         "[WEBCAM] STOP CAMERA RECEIVED"
                     )
+                    
+                    connected_clients.clear()
 
-                    try:
+                    latest_frame = None
 
-                        latest_frame = None
+                    temp = camera
+                    camera = None
 
-                        temp = camera
-                        camera = None
-
-                        if temp is not None:
-
+                    if temp is not None:  
+                                
                             temp.release()
-
-                            print(
-                                "[WEBCAM] Camera Released"
-                            )
 
                             cv2.destroyAllWindows()
 
-                    except Exception as e:
+                            print("[WEBCAM] Camera Released")
 
-                        print(
-                            "[WEBCAM] Stop Error:",
-                            e
-                        )
-
+                
             except Exception as e:
-
                     print(
                         "[WEBCAM] Receiver Error:",
-                       
-                        e
+                       e
                  )
 
     except Exception as e:
@@ -429,6 +430,7 @@ async def cloud_connection_loop():
         finally:
 
             cloud_connected = False
+            cloud_ws = None
 
             await asyncio.sleep(3)
 
@@ -572,35 +574,26 @@ async def handler(ws):
 
         # FIXED:
         if ws not in connected_clients:
+            connected_clients.append(ws)
 
-            connected_clients.append(
-                ws
-            )
 
         print(
-            "[WEBCAM] Local Viewer"
+            "[WEBCAM] Local Viewer connected"
         )
 
-        # FIXED:
-        while True:
-
-            await asyncio.sleep(1)
-
-    except:
-        pass
+        await ws.wait_closed()
 
     finally:
 
         try:
-
-            if ws in connected_clients:
-
-                connected_clients.remove(
-                    ws
-                )
-
+ 
+             if ws in connected_clients:
+                 connected_clients.remove(ws)
+               
         except:
             pass
+
+        print("[WEBCAM] Local Viewer disconnected")
 
 
 # ==============================
