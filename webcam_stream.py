@@ -7,6 +7,9 @@
 
 import sys
 
+from camera.camera_manager import CameraManager
+from camera import camera_state
+
 try:
     sys.stdout.reconfigure(
         encoding="utf-8"
@@ -22,7 +25,6 @@ import json
 import time
 import traceback
 import threading
-import os 
 
 HOST = "0.0.0.0"
 PORT = 8765
@@ -46,8 +48,6 @@ TARGET_FPS = 8
 
 FRAME_DELAY = 0.12
 
-camera = None
-
 # FIXED:
 connected_clients = []
 
@@ -61,72 +61,7 @@ frame_lock = threading.Lock()
 
 camera_running = True
 
-
-# ==============================
-# CAMERA INIT
-# ==============================
-
-def initialize_camera():
-
-    global camera
-
-    try:
-
-        if camera is not None:
-
-            try:
-                camera.release()
-            except:
-                pass
-            
-            cv2.destroyAllWindows()
-
-        camera = cv2.VideoCapture(
-            0,
-            cv2.CAP_DSHOW
-        )
-
-        if not camera.isOpened():
-
-            camera = cv2.VideoCapture(
-                0
-            )
-
-        if not camera.isOpened():
-
-            raise Exception(
-                "Cannot open webcam"
-            )
-
-        camera.set(
-            cv2.CAP_PROP_FRAME_WIDTH,
-            FRAME_WIDTH
-        )
-
-        camera.set(
-            cv2.CAP_PROP_FRAME_HEIGHT,
-            FRAME_HEIGHT
-        )
-
-        camera.set(
-            cv2.CAP_PROP_BUFFERSIZE,
-            1
-        )
-
-        print(
-            "[WEBCAM] Camera Ready"
-        )
-
-        return True
-
-    except Exception as e:
-
-        print(
-            "[WEBCAM]",
-            e
-        )
-
-        return False
+camera_manager = CameraManager()
 
 
 # ==============================
@@ -146,7 +81,7 @@ def camera_capture_loop():
 
         try:
 
-            cam = camera
+            cam = camera_state.camera
 
             if cam is None:
 
@@ -183,6 +118,8 @@ def camera_capture_loop():
             with frame_lock:
 
                 latest_frame = frame.copy()
+
+            camera_state.latest_frame = latest_frame
 
         except Exception as e:
 
@@ -250,7 +187,6 @@ async def cloud_receiver(ws):
 
     global cloud_connected
     global camera_running
-    global camera
     global latest_frame
     global connected_clients
 
@@ -287,37 +223,20 @@ async def cloud_receiver(ws):
                     )
 
                     latest_frame = None
+                    camera_state.latest_frame = None
 
-                    temp = camera
-                    camera = None
-
-                    if temp is not None:  
-                        
-                        try:
-                          temp.release()
-                        except:
-                              pass
-                        
-                        cv2.destroyAllWindows()
-
-                    print("[WEBCAM] Reinitializing Camera...")
-
-                    await asyncio.sleep(3)
-
-                    if initialize_camera():
-
-                        latest_frame = None
+                    if camera_manager.restart_camera():
 
                         print(
-                            "[WEBCAM] Camera Restarted"
+                            "[WEBCAM] Camera Restarted "
                         )
+
 
                     else:
+                               
+                               print("[WEBCAM] Camera Restart Failed")
 
-                        print(
-                            "[WEBCAM] Camera Restart Failed "
-                        )
-
+                   
                 # ======================
                 # STOP CAMERA
                 # ======================
@@ -332,17 +251,11 @@ async def cloud_receiver(ws):
 
                     latest_frame = None
 
-                    temp = camera
-                    camera = None
+                    camera_state.latest_frame = None
 
-                    if temp is not None:  
-                                
-                            temp.release()
+                    camera_manager.stop_camera()
 
-                            cv2.destroyAllWindows()
-
-                            print("[WEBCAM] Camera Released")
-
+                    print("[WEBCAM] Camera Fully Stopped")
                 
             except Exception as e:
                     print(
@@ -606,9 +519,9 @@ async def main():
 
     cloud_send_lock = asyncio.Lock()
 
-    if not initialize_camera():
+    if not camera_manager.start_camera():
 
-        return
+            return
 
     # ==============================
     # CAMERA THREAD
