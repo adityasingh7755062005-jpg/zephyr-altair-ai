@@ -56,6 +56,15 @@ class Core18:
             print("⚠️ No device paired yet. Trigger pairing to connect your phone.")
 
     def _on_desktop_ready(self):
+        # First-run setup case: if no device has EVER been paired,
+        # there's nothing to protect yet, and whoever is at the
+        # keyboard right now is doing initial setup — not an
+        # untrusted session. Skip the freeze/intruder response
+        # entirely until pairing has happened at least once.
+        if not self.trusted_device_manager.load():
+            print("[Core 18] Desktop Ready (first-run setup — no lock/freeze until paired)")
+            return
+
         if self.security_state == SecurityState.LOCKED:
             self.freeze_overlay.show()
             self.intruder_detector.enable()
@@ -64,6 +73,9 @@ class Core18:
             self.intruder_detector.disable()
 
     def _on_windows_lock(self):
+        if not self.trusted_device_manager.load():
+            print("[Core 18] Windows Locked (first-run setup — no freeze until paired)")
+            return
         self.freeze_overlay.show()
         self.intruder_detector.enable()
 
