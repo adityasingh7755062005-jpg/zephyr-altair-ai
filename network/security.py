@@ -1,311 +1,71 @@
-# ==============================
-# FILE: network/security.py
-# FINAL ULTRA STABLE SECURITY VERSION
-# FIXED CLOUD/LAN SWITCH ISSUES
-# FIXED RANDOM COMMAND REJECTS
-# FIXED NONCE COLLISIONS
-# FIXED TIME DRIFT ISSUES
-# LOW LOG VERSION
-# ==============================
+# network/security.py
+# HARDENED — real per-device secrets instead of one hardcoded string
 
 import time
 import hmac
 import hashlib
 import threading
 
-# ==============================
-# SETTINGS
-# ==============================
-
-SECRET = b"zephyr_secret_key"
-
 VALIDITY_SECONDS = 180
-
 NONCE_EXPIRY = 300
-
 CLEANUP_INTERVAL = 30
 
-DEBUG_LOGS = False
-
-# ==============================
-# NONCE STORAGE
-# ==============================
-
 used_nonces = {}
-
 nonce_lock = threading.Lock()
-
 _last_cleanup = 0
 
-# ==============================
-# GENERATE SIGNATURE
-# ==============================
 
-def generate_signature(
-    command,
-    timestamp,
-    device_id,
-    nonce
-):
+def generate_signature(command, timestamp, device_id, nonce, secret: bytes) -> str:
+    """secret is now passed in per-call — the CALLER looks up the real
+    device-specific secret (from trusted_device.json) instead of this
+    file holding one hardcoded value for everyone."""
+    message = f"{command}:{timestamp}:{device_id}:{nonce}".encode()
+    return hmac.new(secret, message, hashlib.sha256).hexdigest()
 
-    message = (
-
-        f"{command}:"
-        f"{timestamp}:"
-        f"{device_id}:"
-        f"{nonce}"
-
-    ).encode()
-
-    return hmac.new(
-
-        SECRET,
-
-        message,
-
-        hashlib.sha256
-
-    ).hexdigest()
-
-# ==============================
-# CLEANUP NONCES
-# ==============================
 
 def cleanup_nonces():
-
     global _last_cleanup
-
     now = time.time()
-
-    if (
-
-        now - _last_cleanup
-
-        < CLEANUP_INTERVAL
-    ):
-
+    if now - _last_cleanup < CLEANUP_INTERVAL:
         return
-
-    expired = []
-
     with nonce_lock:
-
-        for nonce, ts in list(
-            used_nonces.items()
-        ):
-
-            if (
-
-                now - ts
-
-                > NONCE_EXPIRY
-            ):
-
-                expired.append(nonce)
-
-        for nonce in expired:
-
-            try:
-                del used_nonces[nonce]
-            except:
-                pass
-
+        expired = [n for n, ts in used_nonces.items() if now - ts > NONCE_EXPIRY]
+        for n in expired:
+            used_nonces.pop(n, None)
     _last_cleanup = now
 
-    if DEBUG_LOGS and expired:
 
-        print(
-            f"🧹 Cleaned "
-            f"{len(expired)} nonces"
-        )
-
-# ==============================
-# VERIFY REQUEST
-# ==============================
-
-def verify_request(
-
-    command,
-
-    timestamp,
-
-    device_id,
-
-    signature,
-
-    nonce
-):
-
+def verify_request(command, timestamp, device_id, signature, nonce, secret: bytes):
+    """Same nonce/timestamp/HMAC protections as before, but now verified
+    against a REAL secret unique to the paired device, not a hardcoded
+    string anyone reading the source code already knows."""
     try:
-
-        # ==============================
-        # REQUIRED FIELDS
-        # ==============================
-
-        if not all([
-
-            command,
-
-            timestamp,
-
-            device_id,
-
-            signature,
-
-            nonce
-
-        ]):
-
-            return (
-                False,
-                "missing fields"
-            )
-
-        # ==============================
-        # TIMESTAMP PARSE
-        # ==============================
+        if not all([command, timestamp, device_id, signature, nonce, secret]):
+            return False, "missing fields"
 
         try:
-
             timestamp = int(timestamp)
+        except (ValueError, TypeError):
+            return False, "invalid timestamp"
 
-        except:
-
-            return (
-                False,
-                "invalid timestamp"
-            )
-
-        current_time = int(time.time())
-
-        diff = abs(
-            current_time - timestamp
-        )
-
-        # ==============================
-        # TIME CHECK
-        # ==============================
-
-        if diff > VALIDITY_SECONDS:
-
-            if DEBUG_LOGS:
-
-                print(
-                    f"❌ Expired Request | "
-                    f"Diff={diff}s"
-                )
-
-            return (
-                False,
-                "expired request"
-            )
-
-        # ==============================
-        # CLEANUP OLD NONCES
-        # ==============================
+        if abs(int(time.time()) - timestamp) > VALIDITY_SECONDS:
+            return False, "expired request"
 
         cleanup_nonces()
 
-        # ==============================
-        # SIGNATURE CHECK
-        # ==============================
-
-        expected_signature = (
-
-            generate_signature(
-
-                command,
-
-                timestamp,
-
-                device_id,
-
-                nonce
-            )
-        )
-
-        if not hmac.compare_digest(
-
-            signature,
-
-            expected_signature
-
-        ):
-
-            if DEBUG_LOGS:
-
-                print(
-                    "❌ Signature mismatch"
-                )
-
-            return (
-                False,
-                "invalid signature"
-            )
-
-        # ==============================
-        # NONCE REPLAY CHECK
-        # ==============================
+        expected = generate_signature(command, timestamp, device_id, nonce, secret)
+        if not hmac.compare_digest(signature, expected):
+            return False, "invalid signature"
 
         with nonce_lock:
-
-            existing = used_nonces.get(
-                nonce
-            )
-
-            # ==============================
-            # ALLOW VERY FAST DUPLICATES
-            # NETWORK RETRY FIX
-            # ==============================
-
+            existing = used_nonces.get(nonce)
             if existing:
+                if time.time() - existing < 2:
+                    return True, "retry accepted"
+                return False, "replay detected"
+            used_nonces[nonce] = time.time()
 
-                age = time.time() - existing
-
-                if age < 2:
-
-                    return (
-                        True,
-                        "retry accepted"
-                    )
-
-                return (
-                    False,
-                    "replay detected"
-                )
-
-            # ==============================
-            # STORE NONCE
-            # ==============================
-
-            used_nonces[
-                nonce
-            ] = time.time()
-
-        # ==============================
-        # VALID
-        # ==============================
-
-        if DEBUG_LOGS:
-
-            print(
-                f"✅ VALID: {command}"
-            )
-
-        return (
-            True,
-            "valid"
-        )
+        return True, "valid"
 
     except Exception as e:
-
-        if DEBUG_LOGS:
-
-            print(
-                f"❌ Security Error: {e}"
-            )
-
-        return (
-            False,
-            "security exception"
-        )
+        return False, f"security exception: {e}"
