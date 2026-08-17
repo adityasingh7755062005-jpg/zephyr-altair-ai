@@ -76,6 +76,8 @@ class Core18:
         if not self.trusted_device_manager.load():
             print("[Core 18] Windows Locked (first-run setup — no freeze until paired)")
             return
+        print("[Core 18] Windows Locked")
+        self.security_state = SecurityState.LOCKED
         self.freeze_overlay.show()
         self.intruder_detector.enable()
 
