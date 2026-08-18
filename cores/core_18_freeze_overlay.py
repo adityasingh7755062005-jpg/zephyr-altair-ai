@@ -51,8 +51,7 @@ class FreezeOverlay:
                      font=("Segoe UI", 42, "bold")).pack(pady=(0, 30))
             tk.Label(frame, text=(
                 "This device is protected by Zephyr Altair AI.\n\n"
-                "Authorized mobile device required to unlock.\n\n"
-                "Hold Ctrl+Alt+Shift+Z for the local emergency override."
+                "Authorized mobile device required to unlock."
             ), fg="white", bg="black", font=("Segoe UI", 20), justify="center").pack()
 
             overlay.withdraw()

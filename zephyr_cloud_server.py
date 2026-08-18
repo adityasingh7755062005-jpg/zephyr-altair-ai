@@ -199,8 +199,18 @@ async def ws(socket: WebSocket):
                     print(f"❌ COMMAND REJECTED: {err}")
                     continue
 
-                target = msg.get("target")
                 action = msg.get("action")
+
+                # Defense-in-depth: even though a forged action is
+                # already impossible without the real secret, only
+                # forward known, expected actions — catches bugs/typos
+                # rather than blindly relaying arbitrary strings.
+                ALLOWED_ACTIONS = {"lock", "unlock", "start_camera", "stop_camera"}
+                if action not in ALLOWED_ACTIONS:
+                    print(f"❌ COMMAND REJECTED: unknown action '{action}'")
+                    continue
+
+                target = msg.get("target")
                 desktop = desktop_clients.get(target)
                 if desktop:
                     await safe_send(desktop, json.dumps({"type": "command", "action": action}))
