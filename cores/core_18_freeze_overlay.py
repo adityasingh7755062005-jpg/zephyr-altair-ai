@@ -1,15 +1,22 @@
 # cores/core_18_freeze_overlay.py
-# HARDENED — adds a guaranteed local emergency escape
+# Adds a "locked" flag so the overlay shows a different message
+# depending on whether Windows was actually locked, or this is the
+# standalone freeze-only mode.
 
 import tkinter as tk
 import threading
 import queue
 
-# Real-life example: this is like a walk-in freezer having a
-# push-to-exit bar on the INSIDE even though it locks from the
-# outside — no matter what triggered the lock, you can always get
-# out from where you physically are.
 EMERGENCY_KEY_SEQUENCE = ("Control_L", "Alt_L", "Shift_L", "z")
+
+LOCKED_MESSAGE = (
+    "This device is protected by Zephyr Altair AI.\n\n"
+    "Authorized mobile device required to unlock."
+)
+FREEZE_ONLY_MESSAGE = (
+    "Monitoring active. This device is NOT locked.\n\n"
+    "Activity is being watched and recorded."
+)
 
 
 class FreezeOverlay:
@@ -22,15 +29,15 @@ class FreezeOverlay:
         self._thread = threading.Thread(target=self._ui_loop, daemon=True)
         self._thread.start()
 
-    def show(self):
-        self._cmd_queue.put("SHOW")
+    def show(self, locked: bool = True):
+        self._cmd_queue.put(("SHOW", locked))
 
     def hide(self):
-        self._cmd_queue.put("HIDE")
+        self._cmd_queue.put(("HIDE", None))
 
     def stop(self):
         self._running = False
-        self._cmd_queue.put("STOP")
+        self._cmd_queue.put(("STOP", None))
 
     def _ui_loop(self):
         try:
@@ -47,17 +54,16 @@ class FreezeOverlay:
             frame = tk.Frame(overlay, bg="black")
             frame.pack(expand=True)
 
-            tk.Label(frame, text="ZEPHYR SECURITY LOCK", fg="white", bg="black",
-                     font=("Segoe UI", 42, "bold")).pack(pady=(0, 30))
-            tk.Label(frame, text=(
-                "This device is protected by Zephyr Altair AI.\n\n"
-                "Authorized mobile device required to unlock."
-            ), fg="white", bg="black", font=("Segoe UI", 20), justify="center").pack()
+            title_label = tk.Label(frame, text="ZEPHYR SECURITY LOCK", fg="white", bg="black",
+                                    font=("Segoe UI", 42, "bold"))
+            title_label.pack(pady=(0, 30))
+
+            body_label = tk.Label(frame, text=LOCKED_MESSAGE, fg="white", bg="black",
+                                   font=("Segoe UI", 20), justify="center")
+            body_label.pack()
 
             overlay.withdraw()
 
-            # ---- Emergency local override — always works, no network
-            # or pairing required, since you're physically at the machine ----
             def on_key_press(event):
                 self._keys_held.add(event.keysym)
                 if all(k in self._keys_held for k in EMERGENCY_KEY_SEQUENCE):
@@ -85,8 +91,11 @@ class FreezeOverlay:
             def process_commands():
                 try:
                     while True:
-                        cmd = self._cmd_queue.get_nowait()
+                        cmd, payload = self._cmd_queue.get_nowait()
                         if cmd == "SHOW":
+                            locked = payload
+                            body_label.config(text=LOCKED_MESSAGE if locked else FREEZE_ONLY_MESSAGE)
+                            title_label.config(text="ZEPHYR SECURITY LOCK" if locked else "ZEPHYR MONITORING")
                             overlay.deiconify()
                             overlay.lift()
                             overlay.attributes("-topmost", True)

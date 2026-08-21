@@ -8,6 +8,7 @@ from cores.core_18_login_watcher import LoginWatcher
 from cores.core_18_session_watcher import SessionWatcher
 from cores.core_18_freeze_overlay import FreezeOverlay
 from cores.core_18_intruder_detector import IntruderDetector
+from cores.core_7 import Core7VoiceOutput
 
 from network.local_server import start_local_server
 from network.local_discovery import start_local_discovery
@@ -33,7 +34,16 @@ class Core18:
         try:
             self.login_watcher = LoginWatcher(self._on_desktop_ready)
             self.freeze_overlay = FreezeOverlay()
-            self.intruder_detector = IntruderDetector(self.trusted_device_manager)
+
+            # Voice output for the wrong-attempt warning. enabled=True
+            # tries to load Coqui TTS; if that fails for any reason,
+            # Core 7 already falls back to text-only safely — this
+            # feature just won't speak, it won't crash startup.
+            self.voice_output = Core7VoiceOutput(enabled=True)
+
+            self.intruder_detector = IntruderDetector(
+                self.trusted_device_manager, voice_output=self.voice_output
+            )
 
             start_local_server(self)
             start_local_discovery()
@@ -106,12 +116,22 @@ class Core18:
 
     def lock(self):
         self.security_state = SecurityState.LOCKED
-        self.freeze_overlay.show()
+        self.freeze_overlay.show(locked=True)
         self.intruder_detector.enable()
         try:
             ctypes.windll.user32.LockWorkStation()
         except Exception as e:
             print("[ERROR]", e)
+
+    def freeze_only(self):
+        """Arms the freeze overlay + intruder detection WITHOUT
+        locking Windows itself. Real-life example: like arming a
+        home's motion cameras without also deadbolting the doors —
+        your session stays exactly as it is, but you're watching now."""
+        print("[Core 18] Freeze-only requested (Windows NOT being locked)")
+        self.security_state = SecurityState.LOCKED
+        self.freeze_overlay.show(locked=False)
+        self.intruder_detector.enable()
 
     def unlock(self):
         self.security_state = SecurityState.UNLOCKED

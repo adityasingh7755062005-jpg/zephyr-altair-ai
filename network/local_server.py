@@ -1,9 +1,16 @@
 # network/local_server.py
-# HARDENED — real /pair endpoint, real per-device secret verification
+# Merged: real per-device secret verification (from the security
+# rebuild) + your new intruder logs endpoint, plus a real delete route.
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
-import threading, time, logging, socket
+from fastapi.staticfiles import StaticFiles
+
+import threading
+import time
+import os
+import logging
+import socket
 
 from network.security import verify_request
 
@@ -15,13 +22,16 @@ PORT = 5001
 
 class LocalServer:
     def __init__(self, core):
-        self.core = core  # gives access to core.trusted_device_manager, core.pairing_manager
+        self.core = core
         self.app = FastAPI()
+        os.makedirs("intruders", exist_ok=True)
+        self.app.mount("/intruders", StaticFiles(directory="intruders"), name="intruders")
         self._setup_routes()
 
+    # ==============================
+    # VERIFY — real per-device secret, not a hardcoded string
+    # ==============================
     def verify(self, params):
-        """Now looks up the REAL paired device's secret instead of
-        checking against a hardcoded ID/secret pair."""
         try:
             device_id = params.get("device")
             trusted = self.core.trusted_device_manager.load()
@@ -30,12 +40,10 @@ class LocalServer:
                 return False, "untrusted device"
 
             secret = bytes.fromhex(trusted["secret_key"])
-
-            valid, msg = verify_request(
+            return verify_request(
                 params.get("cmd"), params.get("ts"), device_id,
                 params.get("sig"), params.get("nonce"), secret,
             )
-            return valid, msg
         except Exception as e:
             return False, str(e)
 
@@ -43,39 +51,29 @@ class LocalServer:
         @self.app.get("/")
         async def home():
             return {"status": "Zephyr Local Server Running",
-                    "camera_running": self.core.is_camera_running(),
-                    "time": int(time.time())}
+                    "camera_running": self.core.is_camera_running(), "time": int(time.time())}
 
         @self.app.get("/ping")
         async def ping():
-            return {"status": "alive", "time": int(time.time())}
+            return {"status": "alive", "camera_running": self.core.is_camera_running(), "time": int(time.time())}
 
-        # ---- NEW: real pairing endpoints ----
+        # ---- PAIRING (was missing entirely from the last version you sent) ----
         @self.app.post("/pair/start")
         async def pair_start():
-            """Call this LOCALLY (e.g. via a voice command or hotkey on
-            the laptop itself) to begin pairing. Shows a PIN on the
-            laptop's own console — nothing is exposed over network here."""
-            pin = self.core.pairing_manager.start_pairing()
+            self.core.pairing_manager.start_pairing()
             return {"status": "pairing_started", "message": "Enter the PIN shown on the laptop"}
 
         @self.app.post("/pair/confirm")
         async def pair_confirm(request: Request):
-            """Phone app calls this over the LOCAL network with the PIN
-            the owner read off the laptop screen and typed into the app."""
             body = await request.json()
-            pin = body.get("pin", "")
-            device_name = body.get("device_name", "Unknown Device")
-
-            result = self.core.pairing_manager.confirm_pairing(pin, device_name)
-
+            result = self.core.pairing_manager.confirm_pairing(
+                body.get("pin", ""), body.get("device_name", "Unknown Device")
+            )
             if not result["success"]:
                 return JSONResponse(status_code=403, content={"error": result["error"]})
-
-            # Secret is transmitted exactly once, here, over the local
-            # network only — never over the cloud/internet path.
             return {"status": "paired", "device_id": result["device_id"], "secret_key": result["secret_key"]}
 
+        # ---- LOCK / UNLOCK ----
         @self.app.api_route("/lock", methods=["GET", "POST"])
         async def lock(request: Request):
             return await self._guarded(dict(request.query_params), self.core.lock, "locked")
@@ -84,6 +82,7 @@ class LocalServer:
         async def unlock(request: Request):
             return await self._guarded(dict(request.query_params), self.core.unlock, "unlocked")
 
+        # ---- CAMERA ----
         @self.app.api_route("/start_camera", methods=["GET", "POST"])
         async def start_camera(request: Request):
             params = dict(request.query_params)
@@ -102,6 +101,11 @@ class LocalServer:
             self.core.stop_live_camera()
             return {"status": "camera_stopped"}
 
+        # ---- FREEZE OVERLAY (standalone — does NOT lock Windows) ----
+        @self.app.api_route("/freeze_overlay", methods=["GET", "POST"])
+        async def freeze_overlay(request: Request):
+            return await self._guarded(dict(request.query_params), self.core.freeze_only, "freeze_only_armed")
+
         @self.app.api_route("/camera_status", methods=["GET", "POST"])
         async def camera_status(request: Request):
             params = dict(request.query_params)
@@ -109,6 +113,35 @@ class LocalServer:
             if not valid:
                 return JSONResponse(status_code=403, content={"error": msg})
             return {"camera_running": self.core.is_camera_running()}
+
+        # ---- INTRUDER LOGS (your addition, now signature-gated) ----
+        @self.app.api_route("/intruder_logs", methods=["GET", "POST"])
+        async def intruder_logs(request: Request):
+            params = dict(request.query_params)
+            valid, msg = self.verify(params)
+            if not valid:
+                return JSONResponse(status_code=403, content={"error": msg})
+
+            entries = self.core.intruder_detector.get_local_log()
+            local_ip = self.get_local_ip()
+            for entry in entries:
+                entry["image_url"] = f"http://{local_ip}:{PORT}/intruders/{entry['filename']}"
+            return {"status": "ok", "entries": entries}
+
+        # ---- REAL DELETE — for "kept until I delete it" ----
+        @self.app.api_route("/delete_intruder", methods=["GET", "POST"])
+        async def delete_intruder(request: Request):
+            params = dict(request.query_params)
+            valid, msg = self.verify(params)
+            if not valid:
+                return JSONResponse(status_code=403, content={"error": msg})
+
+            filename = params.get("filename")
+            if not filename:
+                return JSONResponse(status_code=400, content={"error": "filename required"})
+
+            deleted = self.core.intruder_detector.delete_capture(filename)
+            return {"status": "ok" if deleted else "not_found", "filename": filename}
 
     async def _guarded(self, params, action_fn, success_status):
         valid, msg = self.verify(params)

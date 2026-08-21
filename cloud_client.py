@@ -4,10 +4,13 @@
 # so even a compromised relay can't forge actions on its own.
 
 import asyncio, websockets, json, threading, traceback, time
+import requests
 
 CLOUD_URL = "wss://zephyr-altair-ai-server.onrender.com/ws"
+HEALTH_URL = "https://zephyr-altair-ai-server.onrender.com/health"
 RECONNECT_DELAY = 3
 PING_INTERVAL = 15
+KEEPALIVE_INTERVAL = 300  # 5 minutes — well under Render's ~15 min sleep timer
 
 # A simple per-connection allowlist: once the relay has forwarded a
 # command, we trust it for this session (the relay already verified
@@ -28,6 +31,21 @@ class CloudClient:
         self.connection_lock = asyncio.Lock()
 
         threading.Thread(target=self._start, daemon=True).start()
+
+        # Independent of the websocket connection entirely — a plain
+        # HTTP GET is the most unambiguous "activity" signal a host
+        # like Render can see, so this runs on its own schedule even
+        # during websocket reconnect gaps.
+        threading.Thread(target=self._keepalive_loop, daemon=True).start()
+
+    def _keepalive_loop(self):
+        while self.running:
+            try:
+                requests.get(HEALTH_URL, timeout=10)
+                print("💓 Keep-alive ping sent")
+            except Exception as e:
+                print(f"⚠️ Keep-alive ping failed: {e}")
+            time.sleep(KEEPALIVE_INTERVAL)
 
     def _start(self):
         try:
@@ -126,6 +144,8 @@ class CloudClient:
             self.core.lock()
         elif action == "unlock":
             self.core.unlock()
+        elif action == "freeze_overlay":
+            self.core.freeze_only()
         elif action in ("start_camera", "start_live_camera"):
             self.core.start_live_camera()
         elif action in ("stop_camera", "stop_live_camera"):
