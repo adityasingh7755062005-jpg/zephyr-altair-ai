@@ -1,591 +1,262 @@
 # ==============================
 # FILE: webcam_stream.py
-# FINAL STABLE CAMERA STREAM
-# ULTRA STABLE VERSION
-# FIXED FREEZE + RECONNECT ISSUE
+# HARDENED — real per-device auth, no more hardcoded ID,
+# local viewer connections now require a signed message.
 # ==============================
 
 import sys
-
 from camera.camera_manager import CameraManager
 from camera import camera_state
+from cores.trusted_device_manager import TrustedDeviceManager
+from network.security import generate_signature, verify_request
 
 try:
-    sys.stdout.reconfigure(
-        encoding="utf-8"
-    )
-except:
+    sys.stdout.reconfigure(encoding="utf-8")
+except Exception:
     pass
 
-import cv2
-import asyncio
-import websockets
-import base64
-import json
-import time
-import traceback
-import threading
+import cv2, asyncio, websockets, base64, json, time, traceback, threading, secrets
 
 HOST = "0.0.0.0"
 PORT = 8765
-
-CLOUD_URI = (
-    "wss://zephyr-altair-ai-server.onrender.com/ws"
-)
-
-DEVICE_ID = "160c02a2018e7132"
-
-# ==============================
-# STREAM SETTINGS
-# ==============================
+CLOUD_URI = "wss://zephyr-altair-ai-server.onrender.com/ws"
 
 JPEG_QUALITY = 25
-
 FRAME_WIDTH = 320
 FRAME_HEIGHT = 240
-
-TARGET_FPS = 8
-
 FRAME_DELAY = 0.12
 
-# FIXED:
 connected_clients = []
-
 cloud_ws = None
 cloud_connected = False
 cloud_send_lock = None
-
 latest_frame = None
-
 frame_lock = threading.Lock()
-
 camera_running = True
-
 camera_manager = CameraManager()
 
+# ---- Real device identity, loaded from actual pairing ----
+_trusted_manager = TrustedDeviceManager()
+_trusted = _trusted_manager.load()
+if not _trusted:
+    print("[WEBCAM] ❌ No paired device found — cannot start camera stream securely")
+    sys.exit(1)
 
-# ==============================
-# CAMERA THREAD
-# ==============================
+DEVICE_ID = _trusted["device_id"]
+SECRET = bytes.fromhex(_trusted["secret_key"])
+
 
 def camera_capture_loop():
-
-    global latest_frame
-    global camera_running
-
-    print(
-        "[WEBCAM] Camera thread started"
-    )
-
+    global latest_frame, camera_running
+    print("[WEBCAM] Camera thread started")
     while camera_running:
-
         try:
-
             cam = camera_state.camera
-
             if cam is None:
-
                 latest_frame = None
-
                 time.sleep(0.1)
-
                 continue
-
             ok, frame = cam.read()
-
             if not ok:
-
                 latest_frame = None
-
-                print("[WEBCAM] Frame Read Failed"
-                )
-
+                print("[WEBCAM] Frame Read Failed")
                 time.sleep(0.05)
-
                 continue
-
-            frame = cv2.resize(
-
-                frame,
-
-                (
-                    FRAME_WIDTH,
-                    FRAME_HEIGHT
-                )
-
-            )
-
+            frame = cv2.resize(frame, (FRAME_WIDTH, FRAME_HEIGHT))
             with frame_lock:
-
                 latest_frame = frame.copy()
-
             camera_state.latest_frame = latest_frame
-
         except Exception as e:
-
-            print(
-                "[WEBCAM] Capture Error:",
-                e
-            )
-
+            print("[WEBCAM] Capture Error:", e)
             time.sleep(1)
 
 
-# ==============================
-# SAFE CLOUD SEND
-# ==============================
-
-async def safe_cloud_send(
-    payload
-):
-
-    global cloud_ws
-    global cloud_connected
-    global cloud_send_lock
-
+async def safe_cloud_send(payload):
+    global cloud_ws, cloud_connected, cloud_send_lock
     try:
-
-        if (
-
-            not cloud_connected
-
-            or
-
-            cloud_ws is None
-
-        ):
-
+        if not cloud_connected or cloud_ws is None:
             return False
-
         async with cloud_send_lock:
-
-            # FIXED:
-            await asyncio.wait_for(
-
-                cloud_ws.send(
-                    payload
-                ),
-
-                timeout=0.5
-
-            )
-
+            await asyncio.wait_for(cloud_ws.send(payload), timeout=0.5)
             return True
-
     except Exception:
-
         cloud_connected = False
-
         return False
 
 
-# ==============================
-# CLOUD RECEIVER
-# ==============================
-
 async def cloud_receiver(ws):
-
-    global cloud_connected
-    global camera_running
-    global latest_frame
-    global connected_clients
-
+    global cloud_connected, camera_running, latest_frame, connected_clients
     try:
-
         async for message in ws:
-            
-            
             try:
-                
                 data = json.loads(message)
                 t = data.get("type")
-                
-
-                # ======================
-                # VIEWER CONNECTED
-                # ======================
 
                 if t == "viewer_connected":
-
-                    print(
-                        "[WEBCAM] Viewer Connected - Stream Active"
-                    )
-                    
-
-                # ======================
-                # START CAMERA
-                # ======================
+                    print("[WEBCAM] Viewer Connected - Stream Active")
 
                 elif t == "start_camera":
-
-                    print(
-                        "[WEBCAM] START CAMERA RECEIVED"
-                    )
-
+                    print("[WEBCAM] START CAMERA RECEIVED")
                     latest_frame = None
                     camera_state.latest_frame = None
-
                     if camera_manager.restart_camera():
-
-                        print(
-                            "[WEBCAM] Camera Restarted "
-                        )
-
-
+                        print("[WEBCAM] Camera Restarted")
                     else:
-                               
-                               print("[WEBCAM] Camera Restart Failed")
-
-                   
-                # ======================
-                # STOP CAMERA
-                # ======================
+                        print("[WEBCAM] Camera Restart Failed")
 
                 elif t == "stop_camera":
-
-                    print(
-                        "[WEBCAM] STOP CAMERA RECEIVED"
-                    )
-                    
+                    print("[WEBCAM] STOP CAMERA RECEIVED")
                     connected_clients.clear()
-
                     latest_frame = None
-
                     camera_state.latest_frame = None
-
                     camera_manager.stop_camera()
-
                     print("[WEBCAM] Camera Fully Stopped")
-                
+
             except Exception as e:
-                    print(
-                        "[WEBCAM] Receiver Error:",
-                       e
-                 )
-
+                print("[WEBCAM] Receiver Error:", e)
     except Exception as e:
+        cloud_connected = False
+        print("[WEBCAM] Cloud Receiver Error:", e)
 
-                           cloud_connected = False
-
-                           print(
-                               "[WEBCAM] Cloud Receiver Error:", e
-                               )
-
-# ==============================
-# CLOUD LOOP
-# ==============================
 
 async def cloud_connection_loop():
-
-    global cloud_ws
-    global cloud_connected
-
+    global cloud_ws, cloud_connected
     while True:
-
         try:
-
-            print(
-                "[WEBCAM] Connecting..."
-            )
-
-            ws = await websockets.connect(
-
-                CLOUD_URI,
-
-                ping_interval=20,
-
-                ping_timeout=20,
-
-                max_size=None
-
-            )
-
+            print("[WEBCAM] Connecting...")
+            ws = await websockets.connect(CLOUD_URI, ping_interval=20, ping_timeout=20, max_size=None)
             cloud_ws = ws
 
+            # Signed registration — matches every other privileged
+            # message in this project now, instead of a bare claim.
+            ts = str(int(time.time()))
+            nonce = secrets.token_hex(8)
+            sig = generate_signature("camera_auth", ts, DEVICE_ID, nonce, SECRET)
+
             auth = {
-
-                "type":
-                    "camera_auth",
-
-                "device_id":
-                    DEVICE_ID,
-
-                "role":
-                    "laptop_camera"
-
+                "type": "camera_auth", "device_id": DEVICE_ID,
+                "cmd": "camera_auth", "ts": ts, "nonce": nonce, "sig": sig,
             }
-
-            await ws.send(
-
-                json.dumps(
-                    auth
-                )
-
-            )
+            await ws.send(json.dumps(auth))
 
             cloud_connected = True
-
-            print(
-                "[WEBCAM] Cloud Connected"
-            )
-
-            await cloud_receiver(
-                ws
-            )
+            print("[WEBCAM] Cloud Connected (signed)")
+            await cloud_receiver(ws)
 
         except Exception as e:
-
-            print(
-                "[WEBCAM] Cloud:",
-                e
-            )
-
+            print("[WEBCAM] Cloud:", e)
         finally:
-
             cloud_connected = False
             cloud_ws = None
-
             await asyncio.sleep(3)
 
 
-# ==============================
-# STREAM CAMERA
-# ==============================
-
 async def stream_camera():
-
     while True:
-
         try:
-
             frame = None
-
             with frame_lock:
-
                 if latest_frame is not None:
-
                     frame = latest_frame.copy()
 
             if frame is None:
-
                 await asyncio.sleep(0.01)
-
                 continue
 
-            ok, buffer = cv2.imencode(
-
-                ".jpg",
-
-                frame,
-
-                [
-
-                    int(
-                        cv2.IMWRITE_JPEG_QUALITY
-                    ),
-
-                    JPEG_QUALITY
-
-                ]
-
-            )
-
+            ok, buffer = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), JPEG_QUALITY])
             if not ok:
-
                 await asyncio.sleep(0.01)
-
                 continue
 
-            jpg = base64.b64encode(
-                buffer
-            ).decode()
-
-            payload = json.dumps({
-
-                "type":
-                    "camera_frame",
-
-                "device_id":
-                    DEVICE_ID,
-
-                "frame":
-                    jpg
-
-            })
-
-            # ======================
-            # LOCAL CLIENTS
-            # ======================
+            jpg = base64.b64encode(buffer).decode()
+            payload = json.dumps({"type": "camera_frame", "device_id": DEVICE_ID, "frame": jpg})
 
             dead = []
-
-            # FIXED:
             for ws in connected_clients[:]:
-
                 try:
-
-                    await asyncio.wait_for(
-
-                        ws.send(
-                            payload
-                        ),
-
-                        timeout=0.5
-
-                    )
-
-                except:
-
-                    dead.append(
-                        ws
-                    )
-
+                    await asyncio.wait_for(ws.send(payload), timeout=0.5)
+                except Exception:
+                    dead.append(ws)
             for ws in dead:
-
                 try:
-
                     if ws in connected_clients:
-
-                        connected_clients.remove(
-                            ws
-                        )
-
-                except:
+                        connected_clients.remove(ws)
+                except Exception:
                     pass
 
-            # ======================
-            # CLOUD
-            # ======================
-
             if cloud_connected:
+                await safe_cloud_send(payload)
 
-                await safe_cloud_send(
-                    payload
-                )
-
-            await asyncio.sleep(
-                FRAME_DELAY
-            )
+            await asyncio.sleep(FRAME_DELAY)
 
         except Exception as e:
-
-            print(
-                "[WEBCAM] Stream:",
-                e
-            )
-
+            print("[WEBCAM] Stream:", e)
             await asyncio.sleep(1)
 
 
-# ==============================
-# LOCAL VIEWER
-# ==============================
-
 async def handler(ws):
-
+    """Local viewer connection — NOW requires a signed auth message
+    as the very first thing sent, before being allowed to receive
+    any frames. Previously accepted any connection with no check at
+    all."""
+    authenticated = False
     try:
+        first_message = await asyncio.wait_for(ws.recv(), timeout=5)
+        data = json.loads(first_message)
 
-        # FIXED:
-        if ws not in connected_clients:
-            connected_clients.append(ws)
+        if data.get("type") != "view_camera_local":
+            print("[WEBCAM] Local viewer rejected — wrong first message type")
+            await ws.close()
+            return
 
-
-        print(
-            "[WEBCAM] Local Viewer connected"
+        valid, msg = verify_request(
+            "view_camera_local", data.get("ts"), DEVICE_ID,
+            data.get("sig"), data.get("nonce"), SECRET,
         )
+        if not valid:
+            print(f"[WEBCAM] Local viewer rejected — {msg}")
+            await ws.close()
+            return
 
+        authenticated = True
+        connected_clients.append(ws)
+        print("[WEBCAM] Local Viewer connected (authenticated)")
         await ws.wait_closed()
 
+    except Exception as e:
+        print("[WEBCAM] Local viewer error:", e)
     finally:
-
-        try:
- 
-             if ws in connected_clients:
-                 connected_clients.remove(ws)
-               
-        except:
-            pass
-
+        if authenticated:
+            try:
+                if ws in connected_clients:
+                    connected_clients.remove(ws)
+            except Exception:
+                pass
         print("[WEBCAM] Local Viewer disconnected")
 
 
-# ==============================
-# MAIN
-# ==============================
-
 async def main():
-
     global cloud_send_lock
-
     cloud_send_lock = asyncio.Lock()
 
     if not camera_manager.start_camera():
+        return
 
-            return
+    threading.Thread(target=camera_capture_loop, daemon=True).start()
 
-    # ==============================
-    # CAMERA THREAD
-    # ==============================
+    server = await websockets.serve(handler, HOST, PORT, ping_interval=20, ping_timeout=20, max_size=None)
+    print("[WEBCAM] Server Ready (authenticated)")
 
-    threading.Thread(
-
-        target=camera_capture_loop,
-
-        daemon=True
-
-    ).start()
-
-    # ==============================
-    # START LOCAL SERVER
-    # ==============================
-
-    server = await websockets.serve(
-
-        handler,
-
-        HOST,
-
-        PORT,
-
-        ping_interval=20,
-
-        ping_timeout=20,
-
-        max_size=None
-
-    )
-
-    print(
-        "[WEBCAM] Server Ready"
-    )
-
-    # ==============================
-    # START TASKS
-    # ==============================
-
-    asyncio.create_task(
-        cloud_connection_loop()
-    )
-
-    asyncio.create_task(
-        stream_camera()
-    )
+    asyncio.create_task(cloud_connection_loop())
+    asyncio.create_task(stream_camera())
 
     await server.wait_closed()
 
 
 if __name__ == "__main__":
-
     try:
-
-        asyncio.run(
-            main()
-        )
-
+        asyncio.run(main())
     except KeyboardInterrupt:
-
         pass
-
     except Exception:
-
         traceback.print_exc()

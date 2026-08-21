@@ -1,8 +1,8 @@
 # zephyr_cloud_server.py
-# Merged: real per-device signature verification (from the security
-# rebuild — the command handler had ZERO verification in the version
-# you sent) + your new intruder log storage, FCM notifications, and
-# a delete endpoint.
+# Full current state — real per-device signatures on every privileged
+# message, intruder log storage + FCM push, health check keep-alive
+# target, and now camera_auth requires a real signature too (was
+# previously just checking the device_id existed, no signature check).
 
 import json, os, time, shutil, threading
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, Form
@@ -31,20 +31,13 @@ camera_viewers = {}
 fcm_tokens = {}
 
 # In-memory only — populated ONLY by a device's own desktop
-# connection (which already has the real secret from local pairing),
-# never accepted from an unverified mobile client.
+# connection (which already has the real secret from local pairing).
 device_secrets = {}
 
 UPLOAD_DIR = "intruders"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 app.mount("/intruders", StaticFiles(directory=UPLOAD_DIR), name="intruders")
 
-# ==========================
-# INTRUDER METADATA STORE
-# NOTE: Render's free tier disk is EPHEMERAL — wiped on restart. This
-# is fine as a short-lived relay: the phone downloads + keeps its own
-# permanent copy. Don't rely on this as long-term storage.
-# ==========================
 INTRUDER_LOG_FILE = "intruder_logs.json"
 intruder_logs_lock = threading.Lock()
 
@@ -98,9 +91,6 @@ async def safe_send(ws, data):
 
 
 def verify_signed(msg: dict):
-    """Real check — every privileged message must carry a valid
-    signature verified against the secret THIS device's desktop
-    established, not a bare device_id claim."""
     device_id = msg.get("device_id") or msg.get("target")
     secret_hex = device_secrets.get(device_id)
     if not secret_hex:
@@ -112,15 +102,6 @@ def verify_signed(msg: dict):
     )
 
 
-# ==========================
-# REGISTER FCM (now signed)
-# ==========================
-# ==========================
-# HEALTH CHECK (keep-alive target)
-# Deliberately unauthenticated and gives away nothing sensitive —
-# this is purely a "the server is awake" heartbeat, hit periodically
-# by the laptop to stop Render's free tier from spinning down.
-# ==========================
 @app.get("/health")
 async def health():
     return {"status": "alive", "time": int(time.time())}
@@ -145,9 +126,6 @@ async def register_fcm(data: dict):
     return {"status": "ok"}
 
 
-# ==========================
-# UPLOAD INTRUDER (now signed — was wide open before)
-# ==========================
 @app.post("/upload_intruder")
 async def upload_intruder(
     file: UploadFile = File(...),
@@ -210,9 +188,6 @@ async def upload_intruder(
         return {"status": "error"}
 
 
-# ==========================
-# LIST INTRUDER LOGS (now signed — was a bare device_id check before)
-# ==========================
 @app.get("/intruder_logs")
 async def intruder_logs(device_id: str, ts: str, nonce: str, sig: str):
     secret_hex = device_secrets.get(device_id)
@@ -226,9 +201,6 @@ async def intruder_logs(device_id: str, ts: str, nonce: str, sig: str):
     return {"status": "ok", "entries": get_intruder_logs(device_id)}
 
 
-# ==========================
-# DELETE INTRUDER (real delete, signed)
-# ==========================
 @app.get("/delete_intruder")
 async def delete_intruder(device_id: str, filename: str, ts: str, nonce: str, sig: str):
     secret_hex = device_secrets.get(device_id)
@@ -251,9 +223,6 @@ async def delete_intruder(device_id: str, filename: str, ts: str, nonce: str, si
     return {"status": "ok"}
 
 
-# ==========================
-# WEBSOCKET
-# ==========================
 @app.websocket("/ws")
 async def ws(socket: WebSocket):
     await socket.accept()
@@ -270,8 +239,6 @@ async def ws(socket: WebSocket):
                 role = msg.get("role", "mobile")
 
                 if role == "desktop":
-                    # ONLY the desktop, which got this secret via real
-                    # local pairing, can establish it in the relay.
                     secret_key = msg.get("secret_key")
                     if not secret_key:
                         await socket.close()
@@ -290,10 +257,15 @@ async def ws(socket: WebSocket):
                 await safe_send(socket, json.dumps({"type": "auth_ok"}))
 
             elif msg_type == "camera_auth":
+                # TIGHTENED: now requires a real signature, not just
+                # "does this device_id have a secret established".
                 device_id = msg.get("device_id")
-                if device_id not in device_secrets:
+                valid, err = verify_signed(msg)
+                if not valid:
+                    print(f"❌ camera_auth rejected: {err}")
                     await socket.close()
                     return
+
                 old = camera_streamers.pop(device_id, None)
                 if old:
                     try:
@@ -331,9 +303,6 @@ async def ws(socket: WebSocket):
                     camera_viewers.pop(x, None)
 
             elif msg_type == "command":
-                # THE critical fix — this handler had ZERO verification
-                # in the version you sent. Every command must now carry
-                # a valid signature.
                 valid, err = verify_signed(msg)
                 if not valid:
                     print(f"❌ COMMAND REJECTED: {err}")
