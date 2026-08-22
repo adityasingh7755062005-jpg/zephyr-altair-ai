@@ -319,6 +319,15 @@ async def ws(socket: WebSocket):
                 if desktop:
                     await safe_send(desktop, json.dumps({"type": "command", "action": action}))
                     print(f"✅ Forwarded verified command: {action}")
+                else:
+                    # THE FIX: previously this just silently did nothing.
+                    # Now the phone actually learns the laptop isn't
+                    # currently reachable, instead of believing it worked.
+                    print(f"❌ No desktop connected for {target} — command dropped")
+                    await safe_send(socket, json.dumps({
+                        "type": "command_failed", "action": action,
+                        "reason": "Laptop is not currently connected to the relay",
+                    }))
 
             elif msg_type in ("start_camera", "stop_camera"):
                 valid, err = verify_signed(msg)
@@ -338,6 +347,16 @@ async def ws(socket: WebSocket):
                         await viewer_ws.close()
                     except Exception:
                         pass
+
+            elif msg_type == "command_ack":
+                # Relayed straight from the desktop that just executed
+                # a command, back to the phone waiting on it — this is
+                # what closes the loop and lets the app show a TRUE
+                # success/failure instead of just "message was sent."
+                ack_device_id = msg.get("device_id") or device_id
+                mobile = mobile_clients.get(ack_device_id)
+                if mobile:
+                    await safe_send(mobile, raw)
 
             elif msg_type == "ping":
                 await safe_send(socket, json.dumps({"type": "pong"}))

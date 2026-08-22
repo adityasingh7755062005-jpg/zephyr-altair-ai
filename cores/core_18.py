@@ -156,7 +156,6 @@ class Core18:
             return False
 
     def start_live_camera(self):
-        # unchanged from your original — kept here for completeness
         with self.camera_lock:
             if self.is_camera_running():
                 return True
@@ -169,12 +168,30 @@ class Core18:
                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                     stdin=subprocess.DEVNULL, text=True, bufsize=1,
                 )
+
+                # CRITICAL FIX: nothing was ever reading this process's
+                # stdout. Once its internal buffer filled up (it prints
+                # often), Windows blocks the child from printing again —
+                # silently freezing the entire camera stream. This
+                # thread continuously drains it so that can't happen.
+                threading.Thread(target=self._drain_camera_output, daemon=True).start()
+
                 time.sleep(2)
                 self.camera_running = self.camera_process.poll() is None
                 return self.camera_running
             except Exception as e:
                 print(f"[Core 18] Camera start error: {e}")
                 return False
+
+    def _drain_camera_output(self):
+        proc = self.camera_process
+        if not proc or not proc.stdout:
+            return
+        try:
+            for line in proc.stdout:
+                print(f"[WEBCAM] {line.rstrip()}")
+        except Exception:
+            pass
 
     def stop_live_camera(self):
         with self.camera_lock:

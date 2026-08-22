@@ -140,20 +140,42 @@ class CloudClient:
         action = data.get("action")
         print(f"📩 Verified cloud command: {action}")
 
-        if action == "lock":
-            self.core.lock()
-        elif action == "unlock":
-            self.core.unlock()
-        elif action == "freeze_overlay":
-            self.core.freeze_only()
-        elif action in ("start_camera", "start_live_camera"):
-            self.core.start_live_camera()
-        elif action in ("stop_camera", "stop_live_camera"):
-            self.core.stop_live_camera()
-        elif action == "camera_status":
-            print(self.core.is_camera_running())
-        else:
-            print("⚠️ Unknown action:", action)
+        try:
+            if action == "lock":
+                self.core.lock()
+            elif action == "unlock":
+                self.core.unlock()
+            elif action == "freeze_overlay":
+                self.core.freeze_only()
+            elif action in ("start_camera", "start_live_camera"):
+                self.core.start_live_camera()
+            elif action in ("stop_camera", "stop_live_camera"):
+                self.core.stop_live_camera()
+            elif action == "camera_status":
+                print(self.core.is_camera_running())
+            else:
+                print("⚠️ Unknown action:", action)
+                return
+
+            # THE FIX: actually confirm we ran it — previously the
+            # phone had no way to know the difference between "the
+            # laptop did this" and "the laptop was never reachable."
+            await self._send_ack(action, success=True)
+
+        except Exception as e:
+            print(f"❌ Command execution failed: {e}")
+            await self._send_ack(action, success=False, error=str(e))
+
+    async def _send_ack(self, action, success, error=None):
+        if not self.websocket:
+            return
+        try:
+            await self.websocket.send(json.dumps({
+                "type": "command_ack", "action": action,
+                "success": success, "error": error,
+            }))
+        except Exception as e:
+            print(f"⚠️ Could not send ack: {e}")
 
     def stop(self):
         self.running = False
