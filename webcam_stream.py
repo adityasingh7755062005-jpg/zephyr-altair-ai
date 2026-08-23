@@ -152,12 +152,24 @@ async def cloud_connection_loop():
 
 
 async def stream_camera():
+    _last_diag = 0
     while True:
         try:
             frame = None
             with frame_lock:
                 if latest_frame is not None:
                     frame = latest_frame.copy()
+
+            # DIAGNOSTIC: every 5 seconds, print the actual state of
+            # everything relevant — this tells us definitively whether
+            # the camera has real frames, and whether any viewers are
+            # actually registered, instead of guessing.
+            now = time.time()
+            if now - _last_diag > 5:
+                _last_diag = now
+                print(f"[WEBCAM][DIAG] has_frame={frame is not None} "
+                      f"local_viewers={len(connected_clients)} "
+                      f"cloud_connected={cloud_connected}")
 
             if frame is None:
                 await asyncio.sleep(0.01)
@@ -195,17 +207,18 @@ async def stream_camera():
 
 
 async def handler(ws):
-    """Local viewer connection — NOW requires a signed auth message
-    as the very first thing sent, before being allowed to receive
-    any frames. Previously accepted any connection with no check at
-    all."""
+    """Local viewer connection — requires a signed auth message as
+    the very first thing sent, before being allowed to receive any
+    frames."""
     authenticated = False
     try:
+        print("[WEBCAM] New local connection attempt received")
         first_message = await asyncio.wait_for(ws.recv(), timeout=5)
+        print(f"[WEBCAM] First message received: {first_message[:150]}")
         data = json.loads(first_message)
 
         if data.get("type") != "view_camera_local":
-            print("[WEBCAM] Local viewer rejected — wrong first message type")
+            print(f"[WEBCAM] Local viewer rejected — wrong first message type: {data.get('type')}")
             await ws.close()
             return
 
@@ -213,6 +226,7 @@ async def handler(ws):
             "view_camera_local", data.get("ts"), DEVICE_ID,
             data.get("sig"), data.get("nonce"), SECRET,
         )
+        print(f"[WEBCAM] Signature check: valid={valid} msg={msg}")
         if not valid:
             print(f"[WEBCAM] Local viewer rejected — {msg}")
             await ws.close()
@@ -220,7 +234,7 @@ async def handler(ws):
 
         authenticated = True
         connected_clients.append(ws)
-        print("[WEBCAM] Local Viewer connected (authenticated)")
+        print(f"[WEBCAM] Local Viewer connected (authenticated) — total viewers now: {len(connected_clients)}")
         await ws.wait_closed()
 
     except Exception as e:

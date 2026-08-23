@@ -7,6 +7,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 import threading
+import asyncio
 import time
 import os
 import logging
@@ -89,7 +90,12 @@ class LocalServer:
             valid, msg = self.verify(params)
             if not valid:
                 return JSONResponse(status_code=403, content={"error": msg})
-            result = self.core.start_live_camera()
+            # FIXED: start_live_camera() blocks for ~2s (time.sleep).
+            # Running it directly here froze the ENTIRE local server —
+            # every other request (lock, unlock, ping) — for that
+            # whole window. Running it in a thread keeps the event
+            # loop free.
+            result = await asyncio.to_thread(self.core.start_live_camera)
             return {"status": "camera_started", "running": result}
 
         @self.app.api_route("/stop_camera", methods=["GET", "POST"])
