@@ -104,7 +104,8 @@ class LocalServer:
             valid, msg = self.verify(params)
             if not valid:
                 return JSONResponse(status_code=403, content={"error": msg})
-            self.core.stop_live_camera()
+            # FIXED: stop_live_camera() can block up to 5s (subprocess.wait)
+            await asyncio.to_thread(self.core.stop_live_camera)
             return {"status": "camera_stopped"}
 
         # ---- FREEZE OVERLAY (standalone — does NOT lock Windows) ----
