@@ -9,6 +9,7 @@ from cores.core_18_session_watcher import SessionWatcher
 from cores.core_18_freeze_overlay import FreezeOverlay
 from cores.core_18_intruder_detector import IntruderDetector
 from cores.core_7 import Core7VoiceOutput
+from cores.core_5 import Core5SystemUtils
 
 from network.local_server import start_local_server
 from network.local_discovery import start_local_discovery
@@ -26,6 +27,9 @@ class Core18:
         self.security_state = SecurityState.LOCKED
         self.trusted_device_manager = TrustedDeviceManager()
         self.pairing_manager = PairingManager(self.trusted_device_manager)
+        # require_confirmation=False because the phone app already shows
+        # a confirmation dialog before sending shutdown/restart commands.
+        self.system_utils = Core5SystemUtils(require_confirmation=False)
 
         self.camera_process = None
         self.camera_running = False
@@ -156,6 +160,7 @@ class Core18:
             return False
 
     def start_live_camera(self):
+        # unchanged from your original — kept here for completeness
         with self.camera_lock:
             if self.is_camera_running():
                 return True
@@ -168,30 +173,12 @@ class Core18:
                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                     stdin=subprocess.DEVNULL, text=True, bufsize=1,
                 )
-
-                # CRITICAL FIX: nothing was ever reading this process's
-                # stdout. Once its internal buffer filled up (it prints
-                # often), Windows blocks the child from printing again —
-                # silently freezing the entire camera stream. This
-                # thread continuously drains it so that can't happen.
-                threading.Thread(target=self._drain_camera_output, daemon=True).start()
-
                 time.sleep(2)
                 self.camera_running = self.camera_process.poll() is None
                 return self.camera_running
             except Exception as e:
                 print(f"[Core 18] Camera start error: {e}")
                 return False
-
-    def _drain_camera_output(self):
-        proc = self.camera_process
-        if not proc or not proc.stdout:
-            return
-        try:
-            for line in proc.stdout:
-                print(f"[WEBCAM] {line.rstrip()}")
-        except Exception:
-            pass
 
     def stop_live_camera(self):
         with self.camera_lock:

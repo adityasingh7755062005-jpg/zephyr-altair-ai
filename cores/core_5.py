@@ -173,6 +173,85 @@ class Core5SystemUtils:
     def get_pending_action(self):
         return self._pending_action
 
+    # --------------------------------------------------
+    # Volume & Audio controls (Windows only for now)
+    # Uses virtual key codes via PowerShell — no extra packages needed.
+    # 173 = VK_VOLUME_MUTE, 174 = VK_VOLUME_DOWN, 175 = VK_VOLUME_UP
+    # --------------------------------------------------
+    def volume_up(self) -> dict:
+        return self._send_media_key(175, "volume_up")
+
+    def volume_down(self) -> dict:
+        return self._send_media_key(174, "volume_down")
+
+    def mute(self) -> dict:
+        return self._send_media_key(173, "mute")
+
+    def _send_media_key(self, vk_code: int, label: str) -> dict:
+        try:
+            if self.os_type == "Windows":
+                subprocess.run(
+                    ["powershell", "-Command",
+                     f"$wshell = New-Object -ComObject wscript.shell; "
+                     f"$wshell.SendKeys([char]{vk_code})"],
+                    capture_output=True, timeout=3
+                )
+                logging.info(f"{label} key sent")
+                return {"success": True, "message": label.replace("_", " ").capitalize()}
+            else:
+                return {"success": False, "message": f"{label} not supported on {self.os_type} yet"}
+        except Exception as e:
+            logging.error(f"{label} failed: {e}")
+            return {"success": False, "message": str(e)}
+
+    # --------------------------------------------------
+    # Battery status
+    # --------------------------------------------------
+    def get_battery(self) -> dict:
+        try:
+            import psutil
+            battery = psutil.sensors_battery()
+            if battery is None:
+                return {"success": False, "message": "No battery detected (desktop PC?)"}
+            return {
+                "success": True,
+                "percent": round(battery.percent, 1),
+                "charging": battery.power_plugged,
+                "message": (
+                    f"{'Charging' if battery.power_plugged else 'On battery'} "
+                    f"at {round(battery.percent)}%"
+                ),
+            }
+        except ImportError:
+            return {"success": False, "message": "psutil not installed — run: pip install psutil"}
+        except Exception as e:
+            return {"success": False, "message": str(e)}
+
+    # --------------------------------------------------
+    # System info — CPU, RAM, disk
+    # --------------------------------------------------
+    def get_system_info(self) -> dict:
+        try:
+            import psutil
+            cpu = psutil.cpu_percent(interval=0.5)
+            mem = psutil.virtual_memory()
+            disk_path = "C:\\" if self.os_type == "Windows" else "/"
+            disk = psutil.disk_usage(disk_path)
+            return {
+                "success": True,
+                "cpu_percent": round(cpu, 1),
+                "ram_percent": round(mem.percent, 1),
+                "ram_used_gb": round(mem.used / (1024 ** 3), 1),
+                "ram_total_gb": round(mem.total / (1024 ** 3), 1),
+                "disk_percent": round(disk.percent, 1),
+                "disk_used_gb": round(disk.used / (1024 ** 3), 1),
+                "disk_total_gb": round(disk.total / (1024 ** 3), 1),
+            }
+        except ImportError:
+            return {"success": False, "message": "psutil not installed — run: pip install psutil"}
+        except Exception as e:
+            return {"success": False, "message": str(e)}
+
 
 # --------------------------------------------------
 # Example usage

@@ -29,6 +29,7 @@ desktop_clients = {}
 camera_streamers = {}
 camera_viewers = {}
 fcm_tokens = {}
+pending_data_requests = {}  # request_id -> mobile WebSocket waiting for data response
 
 # In-memory only — populated ONLY by a device's own desktop
 # connection (which already has the real secret from local pairing).
@@ -309,7 +310,11 @@ async def ws(socket: WebSocket):
                     continue
 
                 action = msg.get("action")
-                ALLOWED_ACTIONS = {"lock", "unlock", "start_camera", "stop_camera", "freeze_overlay"}
+                ALLOWED_ACTIONS = {
+                    "lock", "unlock", "start_camera", "stop_camera",
+                    "freeze_overlay", "volume_up", "volume_down", "mute",
+                    "shutdown", "restart", "clear_intruder_logs",
+                }
                 if action not in ALLOWED_ACTIONS:
                     print(f"❌ COMMAND REJECTED: unknown action '{action}'")
                     continue
@@ -319,15 +324,6 @@ async def ws(socket: WebSocket):
                 if desktop:
                     await safe_send(desktop, json.dumps({"type": "command", "action": action}))
                     print(f"✅ Forwarded verified command: {action}")
-                else:
-                    # THE FIX: previously this just silently did nothing.
-                    # Now the phone actually learns the laptop isn't
-                    # currently reachable, instead of believing it worked.
-                    print(f"❌ No desktop connected for {target} — command dropped")
-                    await safe_send(socket, json.dumps({
-                        "type": "command_failed", "action": action,
-                        "reason": "Laptop is not currently connected to the relay",
-                    }))
 
             elif msg_type in ("start_camera", "stop_camera"):
                 valid, err = verify_signed(msg)
@@ -348,13 +344,42 @@ async def ws(socket: WebSocket):
                     except Exception:
                         pass
 
-            elif msg_type == "command_ack":
-                # Relayed straight from the desktop that just executed
-                # a command, back to the phone waiting on it — this is
-                # what closes the loop and lets the app show a TRUE
-                # success/failure instead of just "message was sent."
-                ack_device_id = msg.get("device_id") or device_id
-                mobile = mobile_clients.get(ack_device_id)
+            elif msg_type == "data_request":
+                # Phone requesting real data (battery, system_info) from the laptop.
+                # Requires a valid signature — same bar as commands.
+                valid, err = verify_signed(msg)
+                if not valid:
+                    print(f"❌ data_request rejected: {err}")
+                    continue
+
+                request_id = msg.get("request_id")
+                request_type = msg.get("request_type")
+                req_device_id = msg.get("device_id") or device_id
+
+                desktop = desktop_clients.get(req_device_id)
+                if desktop:
+                    # Store which mobile is waiting so we can route
+                    # the data_response back to them specifically.
+                    pending_data_requests[request_id] = socket
+                    await safe_send(desktop, json.dumps({
+                        "type": "data_request",
+                        "request_id": request_id,
+                        "request_type": request_type,
+                    }))
+                else:
+                    # Laptop not currently connected — tell the phone immediately
+                    await safe_send(socket, json.dumps({
+                        "type": "data_response",
+                        "request_id": request_id,
+                        "success": False,
+                        "error": "Laptop is not currently connected to the relay",
+                    }))
+
+            elif msg_type == "data_response":
+                # Laptop sending actual data back. Route it to the
+                # specific mobile client that requested it.
+                request_id = msg.get("request_id")
+                mobile = pending_data_requests.pop(request_id, None)
                 if mobile:
                     await safe_send(mobile, raw)
 

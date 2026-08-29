@@ -131,10 +131,34 @@ class CloudClient:
             await asyncio.sleep(PING_INTERVAL)
 
     async def _handle(self, data):
-        # The relay already verified this command's signature before
-        # forwarding it (see zephyr_cloud_server.py) — by the time it
-        # reaches here, it's already been through the real gate.
-        if data.get("type") != "command":
+        msg_type = data.get("type")
+
+        # ---- Data request from relay (battery, system_info) ----
+        if msg_type == "data_request":
+            request_id = data.get("request_id")
+            request_type = data.get("request_type")
+            print(f"📊 Cloud data request: {request_type}")
+
+            if request_type == "battery":
+                result = self.core.system_utils.get_battery()
+            elif request_type == "system_info":
+                result = self.core.system_utils.get_system_info()
+            else:
+                result = {"success": False, "error": f"Unknown request type: {request_type}"}
+
+            if self.websocket:
+                try:
+                    await self.websocket.send(json.dumps({
+                        "type": "data_response",
+                        "request_id": request_id,
+                        **result,
+                    }))
+                except Exception as e:
+                    print(f"⚠️ Could not send data response: {e}")
+            return
+
+        # ---- Command from relay ----
+        if msg_type != "command":
             return
 
         action = data.get("action")
@@ -146,9 +170,20 @@ class CloudClient:
             self.core.unlock()
         elif action == "freeze_overlay":
             self.core.freeze_only()
+        elif action == "volume_up":
+            self.core.system_utils.volume_up()
+        elif action == "volume_down":
+            self.core.system_utils.volume_down()
+        elif action == "mute":
+            self.core.system_utils.mute()
+        elif action == "shutdown":
+            self.core.system_utils.shutdown(confirm=True)
+        elif action == "restart":
+            self.core.system_utils.restart(confirm=True)
+        elif action == "clear_intruder_logs":
+            self.core.intruder_detector.clear_all_logs()
         elif action in ("start_camera", "start_live_camera"):
-            # FIXED: was blocking the whole cloud connection for ~2s
-            await asyncio.to_thread(self.core.start_live_camera)
+            self.core.start_live_camera()
         elif action in ("stop_camera", "stop_live_camera"):
             self.core.stop_live_camera()
         elif action == "camera_status":

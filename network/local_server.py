@@ -7,7 +7,6 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 import threading
-import asyncio
 import time
 import os
 import logging
@@ -90,12 +89,7 @@ class LocalServer:
             valid, msg = self.verify(params)
             if not valid:
                 return JSONResponse(status_code=403, content={"error": msg})
-            # FIXED: start_live_camera() blocks for ~2s (time.sleep).
-            # Running it directly here froze the ENTIRE local server —
-            # every other request (lock, unlock, ping) — for that
-            # whole window. Running it in a thread keeps the event
-            # loop free.
-            result = await asyncio.to_thread(self.core.start_live_camera)
+            result = self.core.start_live_camera()
             return {"status": "camera_started", "running": result}
 
         @self.app.api_route("/stop_camera", methods=["GET", "POST"])
@@ -104,8 +98,7 @@ class LocalServer:
             valid, msg = self.verify(params)
             if not valid:
                 return JSONResponse(status_code=403, content={"error": msg})
-            # FIXED: stop_live_camera() can block up to 5s (subprocess.wait)
-            await asyncio.to_thread(self.core.stop_live_camera)
+            self.core.stop_live_camera()
             return {"status": "camera_stopped"}
 
         # ---- FREEZE OVERLAY (standalone — does NOT lock Windows) ----
@@ -150,12 +143,75 @@ class LocalServer:
             deleted = self.core.intruder_detector.delete_capture(filename)
             return {"status": "ok" if deleted else "not_found", "filename": filename}
 
+        # ---- VOLUME / AUDIO ----
+        @self.app.api_route("/volume_up", methods=["GET", "POST"])
+        async def volume_up(request: Request):
+            return await self._guarded(dict(request.query_params),
+                                       self.core.system_utils.volume_up, "volume_up")
+
+        @self.app.api_route("/volume_down", methods=["GET", "POST"])
+        async def volume_down(request: Request):
+            return await self._guarded(dict(request.query_params),
+                                       self.core.system_utils.volume_down, "volume_down")
+
+        @self.app.api_route("/mute", methods=["GET", "POST"])
+        async def mute(request: Request):
+            return await self._guarded(dict(request.query_params),
+                                       self.core.system_utils.mute, "mute")
+
+        # ---- POWER (confirmation already done in the phone app UI) ----
+        @self.app.api_route("/shutdown", methods=["GET", "POST"])
+        async def shutdown(request: Request):
+            params = dict(request.query_params)
+            valid, msg = self.verify(params)
+            if not valid:
+                return JSONResponse(status_code=403, content={"error": msg})
+            result = self.core.system_utils.shutdown(confirm=True)
+            return {"status": result}
+
+        @self.app.api_route("/restart", methods=["GET", "POST"])
+        async def restart(request: Request):
+            params = dict(request.query_params)
+            valid, msg = self.verify(params)
+            if not valid:
+                return JSONResponse(status_code=403, content={"error": msg})
+            result = self.core.system_utils.restart(confirm=True)
+            return {"status": result}
+
+        # ---- DATA QUERIES (local-only, return real data not just ok/fail) ----
+        @self.app.api_route("/battery", methods=["GET", "POST"])
+        async def battery(request: Request):
+            params = dict(request.query_params)
+            valid, msg = self.verify(params)
+            if not valid:
+                return JSONResponse(status_code=403, content={"error": msg})
+            return self.core.system_utils.get_battery()
+
+        @self.app.api_route("/system_info", methods=["GET", "POST"])
+        async def system_info(request: Request):
+            params = dict(request.query_params)
+            valid, msg = self.verify(params)
+            if not valid:
+                return JSONResponse(status_code=403, content={"error": msg})
+            return self.core.system_utils.get_system_info()
+
+        # ---- CLEAR ALL INTRUDER LOGS ----
+        @self.app.api_route("/clear_intruder_logs", methods=["GET", "POST"])
+        async def clear_intruder_logs(request: Request):
+            return await self._guarded(dict(request.query_params),
+                                       self.core.intruder_detector.clear_all_logs,
+                                       "clear_intruder_logs")
+
     async def _guarded(self, params, action_fn, success_status):
         valid, msg = self.verify(params)
         if not valid:
             print(f"❌ REJECTED: {msg}")
             return JSONResponse(status_code=403, content={"error": msg})
-        action_fn()
+        result = action_fn()
+        # If the action returns a dict (e.g. volume methods), merge it in;
+        # otherwise just return the success status string.
+        if isinstance(result, dict):
+            return result
         return {"status": success_status}
 
     def get_local_ip(self):

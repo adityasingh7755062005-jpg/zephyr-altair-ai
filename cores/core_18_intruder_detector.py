@@ -255,3 +255,21 @@ class IntruderDetector:
         self.activity_count = 0
         self._warned_this_session = False
         print("🔓 Freeze disabled")
+    def clear_all_logs(self) -> bool:
+        """Deletes every intruder image file and wipes the local log.
+        Called when the user taps 'Clear All Logs' in the phone app."""
+        import glob
+        with self.log_lock:
+            entries = self._read_log_file()
+            # Delete every image file referenced in the log
+            for entry in entries:
+                try:
+                    path = os.path.join("intruders", entry.get("filename", ""))
+                    if os.path.exists(path):
+                        os.remove(path)
+                except OSError as e:
+                    print(f"[IntruderDetector] File delete error: {e}")
+            # Wipe the log file itself
+            self._write_log_file([])
+        print("[IntruderDetector] All logs cleared")
+        return True
