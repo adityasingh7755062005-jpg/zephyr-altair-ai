@@ -7,3 +7,4 @@ main_app.py
 firebase_key.json
 data/trusted_device.json
 data/security/intruder_log.json
+core5_system_actions.log
