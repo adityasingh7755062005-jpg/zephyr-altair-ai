@@ -373,7 +373,6 @@ try {{
     }}
     [Windows.Devices.Radios.Radio,Windows.System.Devices,ContentType=WindowsRuntime] | Out-Null
     [Windows.Devices.Radios.RadioAccessStatus,Windows.System.Devices,ContentType=WindowsRuntime] | Out-Null
-    [Windows.Devices.Radios.RadioAccessResult,Windows.System.Devices,ContentType=WindowsRuntime] | Out-Null
 
     $accessStatus = Await ([Windows.Devices.Radios.Radio]::RequestAccessAsync()) ([Windows.Devices.Radios.RadioAccessStatus])
     Write-Output "ACCESS_STATUS:$accessStatus"
@@ -390,7 +389,7 @@ try {{
     if ($null -eq $target) {{ Write-Output "RESULT:NOT_FOUND"; exit }}
 
     Write-Output "CURRENT_STATE:$($target.State)"
-    $setResult = Await ($target.SetStateAsync('{target_state}')) ([Windows.Devices.Radios.RadioAccessResult])
+    $setResult = Await ($target.SetStateAsync('{target_state}')) ([Windows.Devices.Radios.RadioAccessStatus])
     Write-Output "SET_RESULT:$setResult"
     Write-Output "RESULT:$($target.State)"
 }} catch {{
