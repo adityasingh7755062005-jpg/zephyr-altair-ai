@@ -143,6 +143,8 @@ class CloudClient:
                 result = self.core.system_utils.get_battery()
             elif request_type == "system_info":
                 result = self.core.system_utils.get_system_info()
+            elif request_type == "gpu_info":
+                result = self.core.system_utils.get_gpu_info()
             else:
                 result = {"success": False, "error": f"Unknown request type: {request_type}"}
 
@@ -182,6 +184,18 @@ class CloudClient:
             self.core.system_utils.restart(confirm=True)
         elif action == "clear_intruder_logs":
             self.core.intruder_detector.clear_all_logs()
+        elif action == "brightness_up":
+            self.core.system_utils.brightness_up()
+        elif action == "brightness_down":
+            self.core.system_utils.brightness_down()
+        elif action == "wifi_on":
+            self.core.system_utils.wifi_on()
+        elif action == "wifi_off":
+            self.core.system_utils.wifi_off()
+        elif action == "bluetooth_on":
+            self.core.system_utils.bluetooth_on()
+        elif action == "bluetooth_off":
+            self.core.system_utils.bluetooth_off()
         elif action in ("start_camera", "start_live_camera"):
             self.core.start_live_camera()
         elif action in ("stop_camera", "stop_live_camera"):

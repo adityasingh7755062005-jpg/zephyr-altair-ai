@@ -252,6 +252,142 @@ class Core5SystemUtils:
         except Exception as e:
             return {"success": False, "message": str(e)}
 
+    # --------------------------------------------------
+    # GPU stats (NVIDIA only — via the bundled nvidia-smi tool)
+    # --------------------------------------------------
+    def get_gpu_info(self) -> dict:
+        try:
+            result = subprocess.run(
+                ["nvidia-smi",
+                 "--query-gpu=utilization.gpu,temperature.gpu,memory.used,memory.total",
+                 "--format=csv,noheader,nounits"],
+                capture_output=True, text=True, timeout=5
+            )
+            if result.returncode != 0:
+                return {"success": False, "message": "nvidia-smi not available (no NVIDIA GPU or drivers?)"}
+
+            parts = [p.strip() for p in result.stdout.strip().split(",")]
+            util, temp, mem_used, mem_total = parts
+            return {
+                "success": True,
+                "gpu_percent": float(util),
+                "gpu_temp_c": float(temp),
+                "vram_used_mb": float(mem_used),
+                "vram_total_mb": float(mem_total),
+                "vram_percent": round((float(mem_used) / float(mem_total)) * 100, 1),
+            }
+        except FileNotFoundError:
+            return {"success": False, "message": "nvidia-smi not found — no NVIDIA GPU detected"}
+        except Exception as e:
+            return {"success": False, "message": str(e)}
+
+    # --------------------------------------------------
+    # Screen brightness — via WMI (built-in laptop display only)
+    # --------------------------------------------------
+    def set_brightness(self, level: int) -> dict:
+        try:
+            level = max(0, min(100, level))
+            ps_command = (
+                f"(Get-WmiObject -Namespace root/WMI -Class WmiMonitorBrightnessMethods)."
+                f"WmiSetBrightness(1, {level})"
+            )
+            subprocess.run(
+                ["powershell", "-Command", ps_command],
+                capture_output=True, timeout=5
+            )
+            return {"success": True, "message": f"Brightness set to {level}%"}
+        except Exception as e:
+            return {"success": False, "message": str(e)}
+
+    def brightness_up(self) -> dict:
+        return self._adjust_brightness(10)
+
+    def brightness_down(self) -> dict:
+        return self._adjust_brightness(-10)
+
+    def _adjust_brightness(self, delta: int) -> dict:
+        try:
+            script = (
+                "$b = (Get-WmiObject -Namespace root/WMI -Class WmiMonitorBrightness).CurrentBrightness; "
+                f"$new = [Math]::Max(0, [Math]::Min(100, $b + ({delta}))); "
+                "(Get-WmiObject -Namespace root/WMI -Class WmiMonitorBrightnessMethods).WmiSetBrightness(1, $new); "
+                "Write-Output $new"
+            )
+            result = subprocess.run(["powershell", "-Command", script], capture_output=True, text=True, timeout=5)
+            new_value = result.stdout.strip()
+            return {"success": True, "message": f"Brightness: {new_value}%", "brightness": new_value}
+        except Exception as e:
+            return {"success": False, "message": str(e)}
+
+    def brightness_up(self) -> dict:
+        return self._adjust_brightness(10)
+
+    def brightness_down(self) -> dict:
+        return self._adjust_brightness(-10)
+
+    def _adjust_brightness(self, delta: int) -> dict:
+        try:
+            ps_get = "(Get-WmiObject -Namespace root/WMI -Class WmiMonitorBrightness).CurrentBrightness"
+            result = subprocess.run(["powershell", "-Command", ps_get], capture_output=True, text=True, timeout=5)
+            current = int(result.stdout.strip() or 50)
+            return self.set_brightness(current + delta)
+        except Exception as e:
+            return {"success": False, "message": str(e)}
+
+    # --------------------------------------------------
+    # WiFi / Bluetooth on-off — via the Windows.Devices.Radios API.
+    # This is the SAME mechanism Windows' own Quick Settings panel
+    # uses internally — it does NOT require admin rights, unlike
+    # netsh or Disable-PnpDevice (which would silently fail since
+    # Zephyr runs as a normal user process, not elevated).
+    # --------------------------------------------------
+    def wifi_on(self) -> dict:
+        return self._toggle_radio("WiFi", True)
+
+    def wifi_off(self) -> dict:
+        return self._toggle_radio("WiFi", False)
+
+    def bluetooth_on(self) -> dict:
+        return self._toggle_radio("Bluetooth", True)
+
+    def bluetooth_off(self) -> dict:
+        return self._toggle_radio("Bluetooth", False)
+
+    def _toggle_radio(self, kind: str, enable: bool) -> dict:
+        try:
+            target_state = "On" if enable else "Off"
+            script = f'''
+Add-Type -AssemblyName System.Runtime.WindowsRuntime
+$asTaskGeneric = ([System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object {{ $_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation`1' }})[0]
+Function Await($WinRtTask, $ResultType) {{
+    $asTask = $asTaskGeneric.MakeGenericMethod($ResultType)
+    $netTask = $asTask.Invoke($null, @($WinRtTask))
+    $netTask.Wait(-1) | Out-Null
+    $netTask.Result
+}}
+[Windows.Devices.Radios.Radio,Windows.System.Devices,ContentType=WindowsRuntime] | Out-Null
+[Windows.Devices.Radios.RadioAccessStatus,Windows.System.Devices,ContentType=WindowsRuntime] | Out-Null
+Await ([Windows.Devices.Radios.Radio]::RequestAccessAsync()) ([Windows.Devices.Radios.RadioAccessStatus]) | Out-Null
+$radios = Await ([Windows.Devices.Radios.Radio]::GetRadiosAsync()) ([System.Collections.Generic.IReadOnlyList[Windows.Devices.Radios.Radio]])
+$target = $radios | Where-Object {{ $_.Kind -eq '{kind}' }} | Select-Object -First 1
+if ($null -eq $target) {{ Write-Output "NOT_FOUND"; exit }}
+Await ($target.SetStateAsync('{target_state}')) ([Windows.Devices.Radios.RadioAccessResult]) | Out-Null
+Write-Output $target.State
+'''
+            result = subprocess.run(
+                ["powershell", "-Command", script],
+                capture_output=True, text=True, timeout=10
+            )
+            output = result.stdout.strip().splitlines()[-1] if result.stdout.strip() else ""
+
+            if output == "NOT_FOUND":
+                return {"success": False, "message": f"No {kind} radio found on this device"}
+            if output in ("On", "Off"):
+                return {"success": True, "message": f"{kind} turned {output}", "state": output}
+            return {"success": False, "message": f"Unexpected result: {result.stderr[:200] or output}"}
+        except Exception as e:
+            return {"success": False, "message": str(e)}
+
 
 # --------------------------------------------------
 # Example usage

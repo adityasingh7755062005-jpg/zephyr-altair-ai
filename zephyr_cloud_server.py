@@ -314,6 +314,8 @@ async def ws(socket: WebSocket):
                     "lock", "unlock", "start_camera", "stop_camera",
                     "freeze_overlay", "volume_up", "volume_down", "mute",
                     "shutdown", "restart", "clear_intruder_logs",
+                    "brightness_up", "brightness_down", "wifi_on", "wifi_off",
+                    "bluetooth_on", "bluetooth_off",
                 }
                 if action not in ALLOWED_ACTIONS:
                     print(f"❌ COMMAND REJECTED: unknown action '{action}'")
