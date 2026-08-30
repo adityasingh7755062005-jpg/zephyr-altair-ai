@@ -229,23 +229,37 @@ class Core5SystemUtils:
             return {"success": False, "message": str(e)}
 
     # --------------------------------------------------
-    # Absolute volume get/set — needed for the drag slider,
-    # which needs to know the REAL current volume and set it
-    # precisely, not just nudge it up/down a step at a time.
-    # Uses pycaw (Windows Core Audio API wrapper).
+    # Absolute volume get/set — needed for the drag slider.
+    #
+    # FIXED: AudioUtilities.GetSpeakers() was returning pycaw's own
+    # simplified wrapper object (has .FriendlyName, not .Activate())
+    # instead of the raw Windows audio interface — a known version
+    # inconsistency in pycaw. This bypasses that wrapper entirely and
+    # talks to Windows' IMMDeviceEnumerator directly, which is the
+    # actual underlying interface pycaw itself wraps — not dependent
+    # on which pycaw version/wrapper behavior is installed.
     # --------------------------------------------------
+    def _get_volume_control(self):
+        from ctypes import cast, POINTER
+        from comtypes import CLSCTX_ALL, GUID, CoCreateInstance
+        from pycaw.pycaw import IMMDeviceEnumerator, IAudioEndpointVolume
+
+        CLSID_MMDeviceEnumerator = GUID("{BCDE0395-E52F-467C-8E3D-C4579291692E}")
+        enumerator = CoCreateInstance(
+            CLSID_MMDeviceEnumerator, IMMDeviceEnumerator, CLSCTX_ALL
+        )
+        # eRender=0 (output devices), eMultimedia=1 (default multimedia role)
+        # — this is the SAME device Windows' own volume slider controls.
+        device = enumerator.GetDefaultAudioEndpoint(0, 1)
+        interface = device.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
+        return cast(interface, POINTER(IAudioEndpointVolume))
+
     def get_volume(self) -> dict:
         try:
             import pythoncom
             pythoncom.CoInitialize()
             try:
-                from ctypes import cast, POINTER
-                from comtypes import CLSCTX_ALL
-                from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
-
-                devices = AudioUtilities.GetSpeakers()
-                interface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
-                volume_ctrl = cast(interface, POINTER(IAudioEndpointVolume))
+                volume_ctrl = self._get_volume_control()
                 current = volume_ctrl.GetMasterVolumeLevelScalar()  # 0.0 - 1.0
                 muted = volume_ctrl.GetMute()
                 return {"success": True, "volume": round(current * 100), "muted": bool(muted)}
@@ -254,6 +268,7 @@ class Core5SystemUtils:
         except ImportError:
             return {"success": False, "message": "pywin32/pycaw not installed — run: pip install pycaw comtypes pywin32"}
         except Exception as e:
+            print(f"[get_volume] ❌ EXCEPTION: {e}")
             return {"success": False, "message": str(e)}
 
     def set_volume(self, level: int) -> dict:
@@ -261,18 +276,10 @@ class Core5SystemUtils:
             import pythoncom
             pythoncom.CoInitialize()
             try:
-                from ctypes import cast, POINTER
-                from comtypes import CLSCTX_ALL
-                from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
-
                 level = max(0, min(100, int(level)))
                 print(f"[set_volume] Requested level: {level}")
 
-                devices = AudioUtilities.GetSpeakers()
-                print(f"[set_volume] Target device: {devices.FriendlyName if hasattr(devices, 'FriendlyName') else devices}")
-
-                interface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
-                volume_ctrl = cast(interface, POINTER(IAudioEndpointVolume))
+                volume_ctrl = self._get_volume_control()
 
                 before = volume_ctrl.GetMasterVolumeLevelScalar()
                 print(f"[set_volume] Volume BEFORE set: {round(before * 100)}%")
@@ -281,9 +288,6 @@ class Core5SystemUtils:
 
                 after = volume_ctrl.GetMasterVolumeLevelScalar()
                 print(f"[set_volume] Volume AFTER set: {round(after * 100)}% (requested {level}%)")
-
-                if round(after * 100) != level:
-                    print(f"[set_volume] ⚠️ MISMATCH — the call did not actually apply the requested level")
 
                 return {"success": True, "volume": level, "actual_after": round(after * 100)}
             finally:
