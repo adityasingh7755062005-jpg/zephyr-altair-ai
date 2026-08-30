@@ -266,16 +266,32 @@ class Core5SystemUtils:
                 from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
 
                 level = max(0, min(100, int(level)))
+                print(f"[set_volume] Requested level: {level}")
+
                 devices = AudioUtilities.GetSpeakers()
+                print(f"[set_volume] Target device: {devices.FriendlyName if hasattr(devices, 'FriendlyName') else devices}")
+
                 interface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
                 volume_ctrl = cast(interface, POINTER(IAudioEndpointVolume))
+
+                before = volume_ctrl.GetMasterVolumeLevelScalar()
+                print(f"[set_volume] Volume BEFORE set: {round(before * 100)}%")
+
                 volume_ctrl.SetMasterVolumeLevelScalar(level / 100.0, None)
-                return {"success": True, "volume": level}
+
+                after = volume_ctrl.GetMasterVolumeLevelScalar()
+                print(f"[set_volume] Volume AFTER set: {round(after * 100)}% (requested {level}%)")
+
+                if round(after * 100) != level:
+                    print(f"[set_volume] ⚠️ MISMATCH — the call did not actually apply the requested level")
+
+                return {"success": True, "volume": level, "actual_after": round(after * 100)}
             finally:
                 pythoncom.CoUninitialize()
         except ImportError:
             return {"success": False, "message": "pywin32/pycaw not installed — run: pip install pycaw comtypes pywin32"}
         except Exception as e:
+            print(f"[set_volume] ❌ EXCEPTION: {e}")
             return {"success": False, "message": str(e)}
 
     # --------------------------------------------------
