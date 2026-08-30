@@ -356,35 +356,71 @@ class Core5SystemUtils:
     def _toggle_radio(self, kind: str, enable: bool) -> dict:
         try:
             target_state = "On" if enable else "Off"
+            # DIAGNOSTIC VERSION: explicitly captures the access status
+            # (RequestAccessAsync can silently return "Denied" for
+            # non-packaged callers like plain PowerShell, especially
+            # for Bluetooth) and wraps everything in try/catch so any
+            # .NET exception is actually visible instead of swallowed.
             script = f'''
-Add-Type -AssemblyName System.Runtime.WindowsRuntime
-$asTaskGeneric = ([System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object {{ $_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation`1' }})[0]
-Function Await($WinRtTask, $ResultType) {{
-    $asTask = $asTaskGeneric.MakeGenericMethod($ResultType)
-    $netTask = $asTask.Invoke($null, @($WinRtTask))
-    $netTask.Wait(-1) | Out-Null
-    $netTask.Result
+try {{
+    Add-Type -AssemblyName System.Runtime.WindowsRuntime
+    $asTaskGeneric = ([System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object {{ $_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation`1' }})[0]
+    Function Await($WinRtTask, $ResultType) {{
+        $asTask = $asTaskGeneric.MakeGenericMethod($ResultType)
+        $netTask = $asTask.Invoke($null, @($WinRtTask))
+        $netTask.Wait(-1) | Out-Null
+        $netTask.Result
+    }}
+    [Windows.Devices.Radios.Radio,Windows.System.Devices,ContentType=WindowsRuntime] | Out-Null
+    [Windows.Devices.Radios.RadioAccessStatus,Windows.System.Devices,ContentType=WindowsRuntime] | Out-Null
+
+    $accessStatus = Await ([Windows.Devices.Radios.Radio]::RequestAccessAsync()) ([Windows.Devices.Radios.RadioAccessStatus])
+    Write-Output "ACCESS_STATUS:$accessStatus"
+
+    if ($accessStatus -ne 'Allowed') {{
+        Write-Output "RESULT:ACCESS_DENIED"
+        exit
+    }}
+
+    $radios = Await ([Windows.Devices.Radios.Radio]::GetRadiosAsync()) ([System.Collections.Generic.IReadOnlyList[Windows.Devices.Radios.Radio]])
+    Write-Output "RADIO_COUNT:$($radios.Count)"
+
+    $target = $radios | Where-Object {{ $_.Kind -eq '{kind}' }} | Select-Object -First 1
+    if ($null -eq $target) {{ Write-Output "RESULT:NOT_FOUND"; exit }}
+
+    Write-Output "CURRENT_STATE:$($target.State)"
+    $setResult = Await ($target.SetStateAsync('{target_state}')) ([Windows.Devices.Radios.RadioAccessResult])
+    Write-Output "SET_RESULT:$setResult"
+    Write-Output "RESULT:$($target.State)"
+}} catch {{
+    Write-Output "EXCEPTION:$($_.Exception.Message)"
 }}
-[Windows.Devices.Radios.Radio,Windows.System.Devices,ContentType=WindowsRuntime] | Out-Null
-[Windows.Devices.Radios.RadioAccessStatus,Windows.System.Devices,ContentType=WindowsRuntime] | Out-Null
-Await ([Windows.Devices.Radios.Radio]::RequestAccessAsync()) ([Windows.Devices.Radios.RadioAccessStatus]) | Out-Null
-$radios = Await ([Windows.Devices.Radios.Radio]::GetRadiosAsync()) ([System.Collections.Generic.IReadOnlyList[Windows.Devices.Radios.Radio]])
-$target = $radios | Where-Object {{ $_.Kind -eq '{kind}' }} | Select-Object -First 1
-if ($null -eq $target) {{ Write-Output "NOT_FOUND"; exit }}
-Await ($target.SetStateAsync('{target_state}')) ([Windows.Devices.Radios.RadioAccessResult]) | Out-Null
-Write-Output $target.State
 '''
             result = subprocess.run(
                 ["powershell", "-Command", script],
                 capture_output=True, text=True, timeout=10
             )
-            output = result.stdout.strip().splitlines()[-1] if result.stdout.strip() else ""
+            lines = [l.strip() for l in result.stdout.strip().splitlines() if l.strip()]
+            print(f"[{kind} toggle] Full diagnostic output: {lines}")
 
-            if output == "NOT_FOUND":
+            final_line = next((l for l in lines if l.startswith("RESULT:")), None)
+            final_value = final_line.split(":", 1)[1] if final_line else None
+
+            if final_value == "ACCESS_DENIED":
+                access_line = next((l for l in lines if l.startswith("ACCESS_STATUS:")), "")
+                return {"success": False,
+                        "message": f"{kind} access denied by Windows ({access_line}). "
+                                   f"This is a known restriction for non-packaged apps — see console for full diagnostic."}
+            if final_value == "NOT_FOUND":
                 return {"success": False, "message": f"No {kind} radio found on this device"}
-            if output in ("On", "Off"):
-                return {"success": True, "message": f"{kind} turned {output}", "state": output}
-            return {"success": False, "message": f"Unexpected result: {result.stderr[:200] or output}"}
+            if final_value in ("On", "Off"):
+                return {"success": True, "message": f"{kind} turned {final_value}", "state": final_value}
+
+            exception_line = next((l for l in lines if l.startswith("EXCEPTION:")), None)
+            if exception_line:
+                return {"success": False, "message": exception_line}
+
+            return {"success": False, "message": f"Unexpected output: {lines or result.stderr[:200]}"}
         except Exception as e:
             return {"success": False, "message": str(e)}
 
