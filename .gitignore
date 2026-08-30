@@ -8,4 +8,9 @@ firebase_key.json
 data/trusted_device.json
 data/security/intruder_log.json
 core5_system_actions.log
-vene
+venv
+venv/lib/site-packages/pip/_internalutils/logging.py
+venv/lib/site-packages/pip/_internalutils/misc.py
+venv/lib/site-packages/pip/_internalutils/models.py
+venv/lib/site-packages/pip/_internalutils/packaging.py
+venv/lib/site-packages/pip/_internalutils/setuptools_build.py
