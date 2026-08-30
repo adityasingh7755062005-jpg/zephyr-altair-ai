@@ -185,7 +185,31 @@ class Core5SystemUtils:
         return self._send_media_key(174, "volume_down")
 
     def mute(self) -> dict:
-        return self._send_media_key(173, "mute")
+        return self._set_mute(True)
+
+    def unmute(self) -> dict:
+        return self._set_mute(False)
+
+    def _set_mute(self, muted: bool) -> dict:
+        try:
+            import pythoncom
+            pythoncom.CoInitialize()
+            try:
+                from ctypes import cast, POINTER
+                from comtypes import CLSCTX_ALL
+                from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
+
+                devices = AudioUtilities.GetSpeakers()
+                interface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
+                volume_ctrl = cast(interface, POINTER(IAudioEndpointVolume))
+                volume_ctrl.SetMute(muted, None)
+                return {"success": True, "message": "Muted" if muted else "Unmuted", "muted": muted}
+            finally:
+                pythoncom.CoUninitialize()
+        except ImportError:
+            return {"success": False, "message": "pywin32/pycaw not installed — run: pip install pycaw comtypes pywin32"}
+        except Exception as e:
+            return {"success": False, "message": str(e)}
 
     def _send_media_key(self, vk_code: int, label: str) -> dict:
         try:
