@@ -373,6 +373,7 @@ try {{
     }}
     [Windows.Devices.Radios.Radio,Windows.System.Devices,ContentType=WindowsRuntime] | Out-Null
     [Windows.Devices.Radios.RadioAccessStatus,Windows.System.Devices,ContentType=WindowsRuntime] | Out-Null
+    [Windows.Devices.Radios.RadioAccessResult,Windows.System.Devices,ContentType=WindowsRuntime] | Out-Null
 
     $accessStatus = Await ([Windows.Devices.Radios.Radio]::RequestAccessAsync()) ([Windows.Devices.Radios.RadioAccessStatus])
     Write-Output "ACCESS_STATUS:$accessStatus"
