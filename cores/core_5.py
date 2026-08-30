@@ -212,35 +212,45 @@ class Core5SystemUtils:
     # --------------------------------------------------
     def get_volume(self) -> dict:
         try:
-            from ctypes import cast, POINTER
-            from comtypes import CLSCTX_ALL
-            from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
+            import pythoncom
+            pythoncom.CoInitialize()
+            try:
+                from ctypes import cast, POINTER
+                from comtypes import CLSCTX_ALL
+                from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
 
-            devices = AudioUtilities.GetSpeakers()
-            interface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
-            volume_ctrl = cast(interface, POINTER(IAudioEndpointVolume))
-            current = volume_ctrl.GetMasterVolumeLevelScalar()  # 0.0 - 1.0
-            muted = volume_ctrl.GetMute()
-            return {"success": True, "volume": round(current * 100), "muted": bool(muted)}
+                devices = AudioUtilities.GetSpeakers()
+                interface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
+                volume_ctrl = cast(interface, POINTER(IAudioEndpointVolume))
+                current = volume_ctrl.GetMasterVolumeLevelScalar()  # 0.0 - 1.0
+                muted = volume_ctrl.GetMute()
+                return {"success": True, "volume": round(current * 100), "muted": bool(muted)}
+            finally:
+                pythoncom.CoUninitialize()
         except ImportError:
-            return {"success": False, "message": "pycaw not installed — run: pip install pycaw comtypes"}
+            return {"success": False, "message": "pywin32/pycaw not installed — run: pip install pycaw comtypes pywin32"}
         except Exception as e:
             return {"success": False, "message": str(e)}
 
     def set_volume(self, level: int) -> dict:
         try:
-            from ctypes import cast, POINTER
-            from comtypes import CLSCTX_ALL
-            from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
+            import pythoncom
+            pythoncom.CoInitialize()
+            try:
+                from ctypes import cast, POINTER
+                from comtypes import CLSCTX_ALL
+                from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
 
-            level = max(0, min(100, int(level)))
-            devices = AudioUtilities.GetSpeakers()
-            interface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
-            volume_ctrl = cast(interface, POINTER(IAudioEndpointVolume))
-            volume_ctrl.SetMasterVolumeLevelScalar(level / 100.0, None)
-            return {"success": True, "volume": level}
+                level = max(0, min(100, int(level)))
+                devices = AudioUtilities.GetSpeakers()
+                interface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
+                volume_ctrl = cast(interface, POINTER(IAudioEndpointVolume))
+                volume_ctrl.SetMasterVolumeLevelScalar(level / 100.0, None)
+                return {"success": True, "volume": level}
+            finally:
+                pythoncom.CoUninitialize()
         except ImportError:
-            return {"success": False, "message": "pycaw not installed — run: pip install pycaw comtypes"}
+            return {"success": False, "message": "pywin32/pycaw not installed — run: pip install pycaw comtypes pywin32"}
         except Exception as e:
             return {"success": False, "message": str(e)}
 
