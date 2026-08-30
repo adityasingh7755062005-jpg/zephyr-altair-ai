@@ -312,7 +312,7 @@ async def ws(socket: WebSocket):
                 action = msg.get("action")
                 ALLOWED_ACTIONS = {
                     "lock", "unlock", "start_camera", "stop_camera",
-                    "freeze_overlay", "volume_up", "volume_down", "mute",
+                    "freeze_overlay", "volume_up", "volume_down", "mute", "set_volume",
                     "shutdown", "restart", "clear_intruder_logs",
                     "brightness_up", "brightness_down", "wifi_on", "wifi_off",
                     "bluetooth_on", "bluetooth_off",
@@ -324,7 +324,12 @@ async def ws(socket: WebSocket):
                 target = msg.get("target")
                 desktop = desktop_clients.get(target)
                 if desktop:
-                    await safe_send(desktop, json.dumps({"type": "command", "action": action}))
+                    # Forward "value" too, if present — needed for
+                    # set_volume and any future parameterized command.
+                    forward = {"type": "command", "action": action}
+                    if "value" in msg:
+                        forward["value"] = msg["value"]
+                    await safe_send(desktop, json.dumps(forward))
                     print(f"✅ Forwarded verified command: {action}")
 
             elif msg_type in ("start_camera", "stop_camera"):

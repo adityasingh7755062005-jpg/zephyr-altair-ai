@@ -145,6 +145,8 @@ class CloudClient:
                 result = self.core.system_utils.get_system_info()
             elif request_type == "gpu_info":
                 result = self.core.system_utils.get_gpu_info()
+            elif request_type == "get_volume":
+                result = self.core.system_utils.get_volume()
             else:
                 result = {"success": False, "error": f"Unknown request type: {request_type}"}
 
@@ -176,6 +178,10 @@ class CloudClient:
             self.core.system_utils.volume_up()
         elif action == "volume_down":
             self.core.system_utils.volume_down()
+        elif action == "set_volume":
+            level = data.get("value")
+            if level is not None:
+                self.core.system_utils.set_volume(int(level))
         elif action == "mute":
             self.core.system_utils.mute()
         elif action == "shutdown":

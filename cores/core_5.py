@@ -205,6 +205,46 @@ class Core5SystemUtils:
             return {"success": False, "message": str(e)}
 
     # --------------------------------------------------
+    # Absolute volume get/set — needed for the drag slider,
+    # which needs to know the REAL current volume and set it
+    # precisely, not just nudge it up/down a step at a time.
+    # Uses pycaw (Windows Core Audio API wrapper).
+    # --------------------------------------------------
+    def get_volume(self) -> dict:
+        try:
+            from ctypes import cast, POINTER
+            from comtypes import CLSCTX_ALL
+            from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
+
+            devices = AudioUtilities.GetSpeakers()
+            interface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
+            volume_ctrl = cast(interface, POINTER(IAudioEndpointVolume))
+            current = volume_ctrl.GetMasterVolumeLevelScalar()  # 0.0 - 1.0
+            muted = volume_ctrl.GetMute()
+            return {"success": True, "volume": round(current * 100), "muted": bool(muted)}
+        except ImportError:
+            return {"success": False, "message": "pycaw not installed — run: pip install pycaw comtypes"}
+        except Exception as e:
+            return {"success": False, "message": str(e)}
+
+    def set_volume(self, level: int) -> dict:
+        try:
+            from ctypes import cast, POINTER
+            from comtypes import CLSCTX_ALL
+            from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
+
+            level = max(0, min(100, int(level)))
+            devices = AudioUtilities.GetSpeakers()
+            interface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
+            volume_ctrl = cast(interface, POINTER(IAudioEndpointVolume))
+            volume_ctrl.SetMasterVolumeLevelScalar(level / 100.0, None)
+            return {"success": True, "volume": level}
+        except ImportError:
+            return {"success": False, "message": "pycaw not installed — run: pip install pycaw comtypes"}
+        except Exception as e:
+            return {"success": False, "message": str(e)}
+
+    # --------------------------------------------------
     # Battery status
     # --------------------------------------------------
     def get_battery(self) -> dict:

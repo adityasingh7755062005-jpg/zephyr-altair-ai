@@ -195,51 +195,6 @@ class LocalServer:
                 return JSONResponse(status_code=403, content={"error": msg})
             return self.core.system_utils.get_system_info()
 
-        @self.app.api_route("/gpu_info", methods=["GET", "POST"])
-        async def gpu_info(request: Request):
-            params = dict(request.query_params)
-            valid, msg = self.verify(params)
-            if not valid:
-                return JSONResponse(status_code=403, content={"error": msg})
-            return self.core.system_utils.get_gpu_info()
-
-        @self.app.api_route("/brightness_up", methods=["GET", "POST"])
-        async def brightness_up(request: Request):
-            return await self._guarded(dict(request.query_params),
-                                       self.core.system_utils.brightness_up, "brightness_up")
-
-        @self.app.api_route("/brightness_down", methods=["GET", "POST"])
-        async def brightness_down(request: Request):
-            return await self._guarded(dict(request.query_params),
-                                       self.core.system_utils.brightness_down, "brightness_down")
-
-        @self.app.api_route("/wifi_on", methods=["GET", "POST"])
-        async def wifi_on(request: Request):
-            return await self._guarded(dict(request.query_params),
-                                       self.core.system_utils.wifi_on, "wifi_on")
-
-        @self.app.api_route("/wifi_off", methods=["GET", "POST"])
-        async def wifi_off(request: Request):
-            return await self._guarded(dict(request.query_params),
-                                       self.core.system_utils.wifi_off, "wifi_off")
-
-        @self.app.api_route("/bluetooth_on", methods=["GET", "POST"])
-        async def bluetooth_on(request: Request):
-            return await self._guarded(dict(request.query_params),
-                                       self.core.system_utils.bluetooth_on, "bluetooth_on")
-
-        @self.app.api_route("/bluetooth_off", methods=["GET", "POST"])
-        async def bluetooth_off(request: Request):
-            return await self._guarded(dict(request.query_params),
-                                       self.core.system_utils.bluetooth_off, "bluetooth_off")
-
-        # ---- CLEAR ALL INTRUDER LOGS ----
-        @self.app.api_route("/clear_intruder_logs", methods=["GET", "POST"])
-        async def clear_intruder_logs(request: Request):
-            return await self._guarded(dict(request.query_params),
-                                       self.core.intruder_detector.clear_all_logs,
-                                       "clear_intruder_logs")
-
         # ---- GPU (data query, local-only for now — same as battery/system_info) ----
         @self.app.api_route("/gpu_info", methods=["GET", "POST"])
         async def gpu_info(request: Request):
@@ -248,6 +203,26 @@ class LocalServer:
             if not valid:
                 return JSONResponse(status_code=403, content={"error": msg})
             return self.core.system_utils.get_gpu_info()
+
+        # ---- VOLUME (absolute get/set for the drag slider) ----
+        @self.app.api_route("/get_volume", methods=["GET", "POST"])
+        async def get_volume(request: Request):
+            params = dict(request.query_params)
+            valid, msg = self.verify(params)
+            if not valid:
+                return JSONResponse(status_code=403, content={"error": msg})
+            return self.core.system_utils.get_volume()
+
+        @self.app.api_route("/set_volume", methods=["GET", "POST"])
+        async def set_volume(request: Request):
+            params = dict(request.query_params)
+            valid, msg = self.verify(params)
+            if not valid:
+                return JSONResponse(status_code=403, content={"error": msg})
+            level = params.get("level")
+            if level is None:
+                return JSONResponse(status_code=400, content={"error": "level required"})
+            return self.core.system_utils.set_volume(int(level))
 
         # ---- BRIGHTNESS ----
         @self.app.api_route("/brightness_up", methods=["GET", "POST"])
@@ -281,6 +256,13 @@ class LocalServer:
         async def bluetooth_off(request: Request):
             return await self._guarded(dict(request.query_params),
                                        self.core.system_utils.bluetooth_off, "bluetooth_off")
+
+        # ---- CLEAR ALL INTRUDER LOGS ----
+        @self.app.api_route("/clear_intruder_logs", methods=["GET", "POST"])
+        async def clear_intruder_logs(request: Request):
+            return await self._guarded(dict(request.query_params),
+                                       self.core.intruder_detector.clear_all_logs,
+                                       "clear_intruder_logs")
 
     async def _guarded(self, params, action_fn, success_status):
         valid, msg = self.verify(params)
