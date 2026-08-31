@@ -400,10 +400,10 @@ async def ws(socket: WebSocket):
                 if mobile:
                     await safe_send(mobile, raw)
 
-            elif msg_type == "volume_changed":
-                # Real-time push from the laptop's VolumeWatcher —
-                # broadcast to whichever phone is currently connected
-                # for this device, so the overlay can auto-appear.
+            elif msg_type in ("volume_changed", "brightness_changed", "wifi_changed", "bluetooth_changed"):
+                # Real-time push from the laptop's background state
+                # watcher — broadcast to whichever phone is currently
+                # connected for this device, so it updates live.
                 push_device_id = msg.get("device_id") or device_id
                 mobile = mobile_clients.get(push_device_id)
                 if mobile:

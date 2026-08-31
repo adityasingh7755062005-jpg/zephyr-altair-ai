@@ -32,6 +32,7 @@ class CloudClient:
         self.connection_lock = asyncio.Lock()
 
         threading.Thread(target=self._start, daemon=True).start()
+        self.start_state_watcher()
 
         # Independent of the websocket connection entirely — a plain
         # HTTP GET is the most unambiguous "activity" signal a host
@@ -250,10 +251,11 @@ class CloudClient:
         except Exception as e:
             print(f"⚠️ Could not send ack: {e}")
 
-    def push_volume_change(self, volume_percent, muted):
-        """Called by VolumeWatcher's background thread whenever
-        Windows' volume changes for ANY reason — pushes it through
-        the relay so your phone's overlay can auto-appear."""
+    def _push_state_change(self, event_type: str, payload: dict):
+        """Generalized version of push_volume_change — used by the
+        background watcher for volume, brightness, WiFi, and Bluetooth
+        alike. Called from a background thread, so it schedules onto
+        the real event loop via run_coroutine_threadsafe."""
         if not self.websocket or not self._event_loop:
             return
         device_id, _ = self._get_device_info()
@@ -262,15 +264,90 @@ class CloudClient:
         try:
             asyncio.run_coroutine_threadsafe(
                 self.websocket.send(json.dumps({
-                    "type": "volume_changed",
+                    "type": event_type,
                     "device_id": device_id,
-                    "volume": volume_percent,
-                    "muted": muted,
+                    **payload,
                 })),
                 self._event_loop,
             )
         except Exception as e:
-            print(f"⚠️ Could not push volume change: {e}")
+            print(f"⚠️ Could not push {event_type}: {e}")
+
+    def push_volume_change(self, volume_percent, muted):
+        """Called by the state watcher whenever Windows' volume
+        changes for ANY reason — pushes it through the relay so your
+        phone's overlay can auto-appear."""
+        self._push_state_change("volume_changed", {"volume": volume_percent, "muted": muted})
+
+    def push_brightness_change(self, brightness_percent):
+        self._push_state_change("brightness_changed", {"brightness": brightness_percent})
+
+    def push_wifi_change(self, is_on):
+        self._push_state_change("wifi_changed", {"on": is_on})
+
+    def push_bluetooth_change(self, is_on):
+        self._push_state_change("bluetooth_changed", {"on": is_on})
+
+    def start_state_watcher(self):
+        """Background polling loop — checks volume/brightness/WiFi/
+        Bluetooth every 2 seconds and pushes a change event the
+        moment any of them differs from what we last saw. This is
+        what makes changes made directly on the laptop (Windows
+        Settings, keyboard, another app) show up on the phone without
+        needing to reopen anything.
+
+        Polling rather than true OS-level event callbacks — event
+        callbacks (especially for audio) are genuinely fragile to
+        implement correctly via COM/ctypes, and 2-second polling is
+        simple, reliable, and plenty fast for this use case."""
+        threading.Thread(target=self._state_watch_loop, daemon=True).start()
+
+    def _state_watch_loop(self):
+        last_volume = None
+        last_brightness = None
+        last_wifi = None
+        last_bluetooth = None
+
+        while self.running:
+            try:
+                if self.connected:
+                    vol_result = self.core.system_utils.get_volume()
+                    if vol_result.get("success"):
+                        vol = vol_result["volume"]
+                        muted = vol_result.get("muted", False)
+                        if vol != last_volume:
+                            if last_volume is not None:  # skip the very first read
+                                self.push_volume_change(vol, muted)
+                            last_volume = vol
+
+                    bright_result = self.core.system_utils.get_brightness()
+                    if bright_result.get("success"):
+                        bright = bright_result["brightness"]
+                        if bright != last_brightness:
+                            if last_brightness is not None:
+                                self.push_brightness_change(bright)
+                            last_brightness = bright
+
+                    wifi_result = self.core.system_utils.get_wifi_state()
+                    if wifi_result.get("success"):
+                        wifi_on = wifi_result["on"]
+                        if wifi_on != last_wifi:
+                            if last_wifi is not None:
+                                self.push_wifi_change(wifi_on)
+                            last_wifi = wifi_on
+
+                    bt_result = self.core.system_utils.get_bluetooth_state()
+                    if bt_result.get("success"):
+                        bt_on = bt_result["on"]
+                        if bt_on != last_bluetooth:
+                            if last_bluetooth is not None:
+                                self.push_bluetooth_change(bt_on)
+                            last_bluetooth = bt_on
+
+            except Exception as e:
+                print(f"⚠️ State watcher error: {e}")
+
+            time.sleep(2)
 
     def stop(self):
         self.running = False
