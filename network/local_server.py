@@ -260,6 +260,14 @@ class LocalServer:
                                        self.core.system_utils.brightness_down, "brightness_down")
 
         # ---- WIFI ----
+        @self.app.api_route("/get_wifi_state", methods=["GET", "POST"])
+        async def get_wifi_state(request: Request):
+            params = dict(request.query_params)
+            valid, msg = self.verify(params)
+            if not valid:
+                return JSONResponse(status_code=403, content={"error": msg})
+            return self.core.system_utils.get_wifi_state()
+
         @self.app.api_route("/wifi_on", methods=["GET", "POST"])
         async def wifi_on(request: Request):
             return await self._guarded(dict(request.query_params),
@@ -271,6 +279,14 @@ class LocalServer:
                                        self.core.system_utils.wifi_off, "wifi_off")
 
         # ---- BLUETOOTH ----
+        @self.app.api_route("/get_bluetooth_state", methods=["GET", "POST"])
+        async def get_bluetooth_state(request: Request):
+            params = dict(request.query_params)
+            valid, msg = self.verify(params)
+            if not valid:
+                return JSONResponse(status_code=403, content={"error": msg})
+            return self.core.system_utils.get_bluetooth_state()
+
         @self.app.api_route("/bluetooth_on", methods=["GET", "POST"])
         async def bluetooth_on(request: Request):
             return await self._guarded(dict(request.query_params),

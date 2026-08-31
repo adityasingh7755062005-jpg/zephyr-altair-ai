@@ -378,6 +378,17 @@ class Core5SystemUtils:
     # --------------------------------------------------
     # Screen brightness — via WMI (built-in laptop display only)
     # --------------------------------------------------
+    def get_brightness(self) -> dict:
+        try:
+            ps_get = "(Get-WmiObject -Namespace root/WMI -Class WmiMonitorBrightness).CurrentBrightness"
+            result = subprocess.run(["powershell", "-Command", ps_get], capture_output=True, text=True, timeout=5)
+            current = result.stdout.strip()
+            if not current:
+                return {"success": False, "message": "No WMI brightness data — external monitor or unsupported display"}
+            return {"success": True, "brightness": int(current)}
+        except Exception as e:
+            return {"success": False, "message": str(e)}
+
     def set_brightness(self, level: int) -> dict:
         try:
             level = max(0, min(100, level))
@@ -389,7 +400,7 @@ class Core5SystemUtils:
                 ["powershell", "-Command", ps_command],
                 capture_output=True, timeout=5
             )
-            return {"success": True, "message": f"Brightness set to {level}%"}
+            return {"success": True, "brightness": level, "message": f"Brightness set to {level}%"}
         except Exception as e:
             return {"success": False, "message": str(e)}
 
@@ -400,33 +411,9 @@ class Core5SystemUtils:
         return self._adjust_brightness(-10)
 
     def _adjust_brightness(self, delta: int) -> dict:
-        try:
-            script = (
-                "$b = (Get-WmiObject -Namespace root/WMI -Class WmiMonitorBrightness).CurrentBrightness; "
-                f"$new = [Math]::Max(0, [Math]::Min(100, $b + ({delta}))); "
-                "(Get-WmiObject -Namespace root/WMI -Class WmiMonitorBrightnessMethods).WmiSetBrightness(1, $new); "
-                "Write-Output $new"
-            )
-            result = subprocess.run(["powershell", "-Command", script], capture_output=True, text=True, timeout=5)
-            new_value = result.stdout.strip()
-            return {"success": True, "message": f"Brightness: {new_value}%", "brightness": new_value}
-        except Exception as e:
-            return {"success": False, "message": str(e)}
-
-    def brightness_up(self) -> dict:
-        return self._adjust_brightness(10)
-
-    def brightness_down(self) -> dict:
-        return self._adjust_brightness(-10)
-
-    def _adjust_brightness(self, delta: int) -> dict:
-        try:
-            ps_get = "(Get-WmiObject -Namespace root/WMI -Class WmiMonitorBrightness).CurrentBrightness"
-            result = subprocess.run(["powershell", "-Command", ps_get], capture_output=True, text=True, timeout=5)
-            current = int(result.stdout.strip() or 50)
-            return self.set_brightness(current + delta)
-        except Exception as e:
-            return {"success": False, "message": str(e)}
+        current_result = self.get_brightness()
+        current = current_result.get("brightness", 50) if current_result.get("success") else 50
+        return self.set_brightness(current + delta)
 
     # --------------------------------------------------
     # WiFi / Bluetooth on-off — via the Windows.Devices.Radios API.
@@ -446,6 +433,59 @@ class Core5SystemUtils:
 
     def bluetooth_off(self) -> dict:
         return self._toggle_radio("Bluetooth", False)
+
+    def get_wifi_state(self) -> dict:
+        return self._get_radio_state("WiFi")
+
+    def get_bluetooth_state(self) -> dict:
+        return self._get_radio_state("Bluetooth")
+
+    def _get_radio_state(self, kind: str) -> dict:
+        """Read-only — reads current state without changing anything.
+        Reuses the same reliable Radios API path as the on/off toggle."""
+        try:
+            script = f'''
+try {{
+    Add-Type -AssemblyName System.Runtime.WindowsRuntime
+    $asTaskGeneric = ([System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object {{ $_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation`1' }})[0]
+    Function Await($WinRtTask, $ResultType) {{
+        $asTask = $asTaskGeneric.MakeGenericMethod($ResultType)
+        $netTask = $asTask.Invoke($null, @($WinRtTask))
+        $netTask.Wait(-1) | Out-Null
+        $netTask.Result
+    }}
+    [Windows.Devices.Radios.Radio,Windows.System.Devices,ContentType=WindowsRuntime] | Out-Null
+    [Windows.Devices.Radios.RadioAccessStatus,Windows.System.Devices,ContentType=WindowsRuntime] | Out-Null
+
+    $accessStatus = Await ([Windows.Devices.Radios.Radio]::RequestAccessAsync()) ([Windows.Devices.Radios.RadioAccessStatus])
+    if ($accessStatus -ne 'Allowed') {{ Write-Output "RESULT:ACCESS_DENIED"; exit }}
+
+    $radios = Await ([Windows.Devices.Radios.Radio]::GetRadiosAsync()) ([System.Collections.Generic.IReadOnlyList[Windows.Devices.Radios.Radio]])
+    $target = $radios | Where-Object {{ $_.Kind -eq '{kind}' }} | Select-Object -First 1
+    if ($null -eq $target) {{ Write-Output "RESULT:NOT_FOUND"; exit }}
+
+    Write-Output "RESULT:$($target.State)"
+}} catch {{
+    Write-Output "EXCEPTION:$($_.Exception.Message)"
+}}
+'''
+            result = subprocess.run(
+                ["powershell", "-Command", script],
+                capture_output=True, text=True, timeout=8
+            )
+            lines = [l.strip() for l in result.stdout.strip().splitlines() if l.strip()]
+            final_line = next((l for l in lines if l.startswith("RESULT:")), None)
+            final_value = final_line.split(":", 1)[1] if final_line else None
+
+            if final_value in ("On", "Off"):
+                return {"success": True, "state": final_value, "on": final_value == "On"}
+            if final_value == "NOT_FOUND":
+                return {"success": False, "message": f"No {kind} radio found"}
+            if final_value == "ACCESS_DENIED":
+                return {"success": False, "message": f"{kind} access denied"}
+            return {"success": False, "message": f"Unexpected output: {lines}"}
+        except Exception as e:
+            return {"success": False, "message": str(e)}
 
     def _toggle_radio(self, kind: str, enable: bool) -> dict:
         try:

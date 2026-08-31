@@ -155,6 +155,10 @@ class CloudClient:
                 result = self.core.system_utils.get_volume()
             elif request_type == "get_brightness":
                 result = self.core.system_utils.get_brightness()
+            elif request_type == "get_wifi_state":
+                result = self.core.system_utils.get_wifi_state()
+            elif request_type == "get_bluetooth_state":
+                result = self.core.system_utils.get_bluetooth_state()
             else:
                 result = {"success": False, "error": f"Unknown request type: {request_type}"}
 
