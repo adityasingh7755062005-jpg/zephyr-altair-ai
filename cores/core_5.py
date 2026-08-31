@@ -3,9 +3,11 @@
 # =========================================================
 
 import os
+import time
 import platform
 import subprocess
 import logging
+import requests
 from datetime import datetime
 
 # --------------------------------------------------
@@ -42,6 +44,15 @@ class Core5SystemUtils:
         self.os_type = platform.system()  # "Windows", "Linux", "Darwin"
         self.require_confirmation = require_confirmation
         self._pending_action = None  # tracks an action awaiting confirmation
+
+        # Previous samples, needed to compute delta-based metrics
+        # (disk activity %, network kbps) — both require two points
+        # in time, not just one snapshot.
+        self._last_disk_io = None
+        self._last_disk_time = None
+        self._last_net_io = None
+        self._last_net_time = None
+        self._cpu_name_cache = None  # WMI lookup is slow-ish, cache once
         print(f"[Core 5] System utilities online (OS: {self.os_type})")
         logging.info(f"Core 5 initialized on {self.os_type}")
 
@@ -322,6 +333,157 @@ class Core5SystemUtils:
             return {"success": False, "message": str(e)}
 
     # --------------------------------------------------
+    # CPU details — % (already had), plus GHz and the real friendly
+    # name ("AMD Ryzen 7 7445HS"), not platform.processor()'s raw
+    # string (which on Windows is something unreadable like
+    # "AMD64 Family 25 Model 68..." — WMI is what actually has the
+    # human-readable name, same proven PowerShell pattern used
+    # elsewhere in this file, not a new interop approach).
+    # --------------------------------------------------
+    def get_cpu_details(self) -> dict:
+        try:
+            import psutil
+            cpu_percent = psutil.cpu_percent(interval=0.3)
+            freq = psutil.cpu_freq()
+            ghz = round(freq.current / 1000, 2) if freq else None
+
+            if self._cpu_name_cache is None:
+                self._cpu_name_cache = self._get_cpu_name()
+
+            return {
+                "success": True,
+                "cpu_percent": round(cpu_percent, 1),
+                "cpu_ghz": ghz,
+                "cpu_name": self._cpu_name_cache,
+            }
+        except ImportError:
+            return {"success": False, "message": "psutil not installed"}
+        except Exception as e:
+            return {"success": False, "message": str(e)}
+
+    def _get_cpu_name(self) -> str:
+        try:
+            if self.os_type != "Windows":
+                return platform.processor() or "Unknown CPU"
+            result = subprocess.run(
+                ["powershell", "-Command", "(Get-WmiObject Win32_Processor).Name"],
+                capture_output=True, text=True, timeout=5
+            )
+            name = result.stdout.strip()
+            return name if name else (platform.processor() or "Unknown CPU")
+        except Exception:
+            return platform.processor() or "Unknown CPU"
+
+    # --------------------------------------------------
+    # Disk space per drive letter (separate from activity — this is
+    # genuinely different data: how full each drive is, not how busy
+    # the underlying physical disk is right now).
+    # --------------------------------------------------
+    def get_all_drives(self) -> dict:
+        try:
+            import psutil
+            drives = []
+            for part in psutil.disk_partitions(all=False):
+                try:
+                    usage = psutil.disk_usage(part.mountpoint)
+                    drives.append({
+                        "drive": part.device.rstrip("\\"),
+                        "percent": round(usage.percent, 1),
+                        "used_gb": round(usage.used / (1024 ** 3), 1),
+                        "total_gb": round(usage.total / (1024 ** 3), 1),
+                    })
+                except (PermissionError, OSError):
+                    continue  # e.g. an empty CD drive
+            return {"success": True, "drives": drives}
+        except ImportError:
+            return {"success": False, "message": "psutil not installed"}
+        except Exception as e:
+            return {"success": False, "message": str(e)}
+
+    # --------------------------------------------------
+    # Disk ACTIVITY % — per physical disk, matching what Task Manager
+    # actually shows (one number per physical drive, not per letter —
+    # C: and D: on the same NVMe drive would show identical numbers
+    # anyway, since they share the same underlying hardware).
+    #
+    # Computed from the DELTA in read_time+write_time (milliseconds
+    # psutil reports the disk spent busy) between two calls, divided
+    # by the real time elapsed — this is the same underlying approach
+    # Windows' own "% Active Time" counter uses.
+    # --------------------------------------------------
+    def get_disk_activity(self) -> dict:
+        try:
+            import psutil
+            now = time.time()
+            current_io = psutil.disk_io_counters(perdisk=True)
+
+            if self._last_disk_io is None or self._last_disk_time is None:
+                self._last_disk_io = current_io
+                self._last_disk_time = now
+                # First call — no delta possible yet
+                disks = [{"name": name, "activity_percent": 0.0} for name in current_io]
+                return {"success": True, "disks": disks}
+
+            elapsed_ms = (now - self._last_disk_time) * 1000
+            disks = []
+            for name, counters in current_io.items():
+                prev = self._last_disk_io.get(name)
+                if prev is None or elapsed_ms <= 0:
+                    disks.append({"name": name, "activity_percent": 0.0})
+                    continue
+                busy_delta_ms = (counters.read_time + counters.write_time) - (prev.read_time + prev.write_time)
+                activity = max(0.0, min(100.0, (busy_delta_ms / elapsed_ms) * 100))
+                disks.append({"name": name, "activity_percent": round(activity, 1)})
+
+            self._last_disk_io = current_io
+            self._last_disk_time = now
+            return {"success": True, "disks": disks}
+        except ImportError:
+            return {"success": False, "message": "psutil not installed"}
+        except Exception as e:
+            return {"success": False, "message": str(e)}
+
+    # --------------------------------------------------
+    # Network speed in kbps, Ethernet and WiFi tracked separately.
+    # Same delta-over-time approach as disk activity above.
+    # --------------------------------------------------
+    def get_network_speed(self) -> dict:
+        try:
+            import psutil
+            now = time.time()
+            current_io = psutil.net_io_counters(pernic=True)
+
+            if self._last_net_io is None or self._last_net_time is None:
+                self._last_net_io = current_io
+                self._last_net_time = now
+                return {"success": True, "ethernet_kbps": 0.0, "wifi_kbps": 0.0}
+
+            elapsed = now - self._last_net_time
+            ethernet_kbps = 0.0
+            wifi_kbps = 0.0
+
+            for name, counters in current_io.items():
+                prev = self._last_net_io.get(name)
+                if prev is None or elapsed <= 0:
+                    continue
+                bytes_delta = (counters.bytes_sent + counters.bytes_recv) - (prev.bytes_sent + prev.bytes_recv)
+                kbps = round((bytes_delta * 8 / 1000) / elapsed, 1)
+
+                lname = name.lower()
+                if "wi-fi" in lname or "wifi" in lname or "wlan" in lname:
+                    wifi_kbps = kbps
+                elif "ethernet" in lname or "eth" in lname:
+                    ethernet_kbps = kbps
+
+            self._last_net_io = current_io
+            self._last_net_time = now
+            return {"success": True, "ethernet_kbps": ethernet_kbps, "wifi_kbps": wifi_kbps}
+        except ImportError:
+            return {"success": False, "message": "psutil not installed"}
+        except Exception as e:
+            return {"success": False, "message": str(e)}
+
+    # --------------------------------------------------
     # System info — CPU, RAM, disk
     # --------------------------------------------------
     def get_system_info(self) -> dict:
@@ -353,7 +515,7 @@ class Core5SystemUtils:
         try:
             result = subprocess.run(
                 ["nvidia-smi",
-                 "--query-gpu=utilization.gpu,temperature.gpu,memory.used,memory.total",
+                 "--query-gpu=name,utilization.gpu,temperature.gpu,memory.used,memory.total",
                  "--format=csv,noheader,nounits"],
                 capture_output=True, text=True, timeout=5
             )
@@ -361,9 +523,10 @@ class Core5SystemUtils:
                 return {"success": False, "message": "nvidia-smi not available (no NVIDIA GPU or drivers?)"}
 
             parts = [p.strip() for p in result.stdout.strip().split(",")]
-            util, temp, mem_used, mem_total = parts
+            name, util, temp, mem_used, mem_total = parts
             return {
                 "success": True,
+                "gpu_name": name,
                 "gpu_percent": float(util),
                 "gpu_temp_c": float(temp),
                 "vram_used_mb": float(mem_used),
@@ -374,6 +537,72 @@ class Core5SystemUtils:
             return {"success": False, "message": "nvidia-smi not found — no NVIDIA GPU detected"}
         except Exception as e:
             return {"success": False, "message": str(e)}
+
+    # --------------------------------------------------
+    # CPU temperature & fan speed — via LibreHardwareMonitor's
+    # Remote Web Server. Windows has no reliable built-in way to read
+    # either of these, so this reads them from LHM's local JSON feed
+    # instead — you need LHM running with the Remote Web Server
+    # enabled (Options > Remote Web Server > Run) for this to work.
+    # --------------------------------------------------
+    def _query_lhm(self):
+        try:
+            response = requests.get("http://localhost:8085/data.json", timeout=3)
+            if response.status_code != 200:
+                return None
+            return response.json()
+        except Exception:
+            return None
+
+    def _find_lhm_sensor(self, node, keywords):
+        """Recursively searches LHM's JSON hardware tree for a sensor
+        whose label matches any of the given keywords. LHM's tree
+        shape varies by motherboard/CPU, so we search by name rather
+        than a fixed path."""
+        text = node.get("Text", "")
+        value = node.get("Value", "")
+        if value and value != "-" and any(kw.lower() in text.lower() for kw in keywords):
+            return value
+        for child in node.get("Children", []):
+            result = self._find_lhm_sensor(child, keywords)
+            if result:
+                return result
+        return None
+
+    def _parse_lhm_number(self, raw_value: str):
+        import re
+        match = re.search(r"[-+]?\d*\.?\d+", raw_value)
+        return float(match.group()) if match else None
+
+    def get_cpu_temperature(self) -> dict:
+        data = self._query_lhm()
+        if data is None:
+            return {"success": False,
+                    "message": "LibreHardwareMonitor not running, or Remote Web Server not enabled"}
+
+        raw = self._find_lhm_sensor(data, ["CPU Package", "Core Max", "CPU Temperature"])
+        if raw is None:
+            return {"success": False, "message": "No CPU temperature sensor found in LibreHardwareMonitor"}
+
+        temp = self._parse_lhm_number(raw)
+        if temp is None:
+            return {"success": False, "message": f"Could not parse temperature value: {raw}"}
+        return {"success": True, "temp_c": temp}
+
+    def get_fan_speed(self) -> dict:
+        data = self._query_lhm()
+        if data is None:
+            return {"success": False,
+                    "message": "LibreHardwareMonitor not running, or Remote Web Server not enabled"}
+
+        raw = self._find_lhm_sensor(data, ["CPU Fan", "System Fan", "Fan #1", "Fan #2"])
+        if raw is None:
+            return {"success": False, "message": "No fan sensor found in LibreHardwareMonitor"}
+
+        rpm = self._parse_lhm_number(raw)
+        if rpm is None:
+            return {"success": False, "message": f"Could not parse fan speed value: {raw}"}
+        return {"success": True, "rpm": round(rpm)}
 
     # --------------------------------------------------
     # Screen brightness — via WMI (built-in laptop display only)

@@ -400,7 +400,8 @@ async def ws(socket: WebSocket):
                 if mobile:
                     await safe_send(mobile, raw)
 
-            elif msg_type in ("volume_changed", "brightness_changed", "wifi_changed", "bluetooth_changed"):
+            elif msg_type in ("volume_changed", "brightness_changed", "wifi_changed",
+                              "bluetooth_changed", "system_stats"):
                 # Real-time push from the laptop's background state
                 # watcher — broadcast to whichever phone is currently
                 # connected for this device, so it updates live.
@@ -408,6 +409,19 @@ async def ws(socket: WebSocket):
                 mobile = mobile_clients.get(push_device_id)
                 if mobile:
                     await safe_send(mobile, raw)
+
+            elif msg_type in ("start_system_monitoring", "stop_system_monitoring"):
+                # Phone opening/closing the System screen — forward to
+                # the desktop so it starts/stops the 1s stats loop.
+                # Requires a real signature, same bar as everything else.
+                valid, err = verify_signed(msg)
+                if not valid:
+                    print(f"❌ {msg_type} rejected: {err}")
+                    continue
+                target = msg.get("target") or msg.get("device_id")
+                desktop = desktop_clients.get(target)
+                if desktop:
+                    await safe_send(desktop, json.dumps({"type": msg_type}))
 
             elif msg_type == "ping":
                 await safe_send(socket, json.dumps({"type": "pong"}))

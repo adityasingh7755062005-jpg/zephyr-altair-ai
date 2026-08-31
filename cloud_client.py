@@ -28,6 +28,9 @@ class CloudClient:
         self.connected = False
         self.websocket = None
         self._event_loop = None
+        # True only while the phone's System screen is actually open
+        # — avoids polling/pushing every second when nobody's watching.
+        self._system_monitoring_active = False
         self.last_pong = time.time()
         self.connection_lock = asyncio.Lock()
 
@@ -139,6 +142,18 @@ class CloudClient:
 
     async def _handle(self, data):
         msg_type = data.get("type")
+
+        # ---- Live system dashboard monitoring toggle ----
+        if msg_type == "start_system_monitoring":
+            print("📈 System monitoring started (phone opened the System screen)")
+            self._system_monitoring_active = True
+            threading.Thread(target=self._system_stats_loop, daemon=True).start()
+            return
+
+        if msg_type == "stop_system_monitoring":
+            print("📉 System monitoring stopped")
+            self._system_monitoring_active = False
+            return
 
         # ---- Data request from relay (battery, system_info) ----
         if msg_type == "data_request":
@@ -287,6 +302,39 @@ class CloudClient:
 
     def push_bluetooth_change(self, is_on):
         self._push_state_change("bluetooth_changed", {"on": is_on})
+
+    def _system_stats_loop(self):
+        """Runs only while the phone's System screen is open — gathers
+        everything needed for the live dashboard every second and
+        pushes it as one combined event. Stops the instant the phone
+        leaves the screen (checked every iteration via the flag)."""
+        while self.running and self._system_monitoring_active:
+            try:
+                cpu = self.core.system_utils.get_cpu_details()
+                sysinfo = self.core.system_utils.get_system_info()
+                gpu = self.core.system_utils.get_gpu_info()
+                drives = self.core.system_utils.get_all_drives()
+                disk_activity = self.core.system_utils.get_disk_activity()
+                net = self.core.system_utils.get_network_speed()
+                battery = self.core.system_utils.get_battery()
+
+                self._push_state_change("system_stats", {
+                    "cpu": cpu,
+                    "memory": {
+                        "percent": sysinfo.get("ram_percent"),
+                        "used_gb": sysinfo.get("ram_used_gb"),
+                        "total_gb": sysinfo.get("ram_total_gb"),
+                    } if sysinfo.get("success") else None,
+                    "gpu": gpu,
+                    "drives": drives.get("drives") if drives.get("success") else [],
+                    "disk_activity": disk_activity.get("disks") if disk_activity.get("success") else [],
+                    "network": net,
+                    "battery": battery,
+                })
+            except Exception as e:
+                print(f"⚠️ System stats loop error: {e}")
+
+            time.sleep(1)
 
     def start_state_watcher(self):
         """Background polling loop — checks volume/brightness/WiFi/
