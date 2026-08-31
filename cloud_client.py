@@ -27,6 +27,7 @@ class CloudClient:
         self.running = True
         self.connected = False
         self.websocket = None
+        self._event_loop = None
         self.last_pong = time.time()
         self.connection_lock = asyncio.Lock()
 
@@ -61,6 +62,11 @@ class CloudClient:
         return trusted.get("device_id"), trusted.get("secret_key")
 
     async def _loop(self):
+        # Store the REAL running loop object — needed so
+        # push_volume_change() (called from a different thread) can
+        # safely schedule work back onto this loop.
+        self._event_loop = asyncio.get_running_loop()
+
         while self.running:
             device_id, secret_key = self._get_device_info()
             if not device_id or not secret_key:
@@ -147,6 +153,8 @@ class CloudClient:
                 result = self.core.system_utils.get_gpu_info()
             elif request_type == "get_volume":
                 result = self.core.system_utils.get_volume()
+            elif request_type == "get_brightness":
+                result = self.core.system_utils.get_brightness()
             else:
                 result = {"success": False, "error": f"Unknown request type: {request_type}"}
 
@@ -168,48 +176,97 @@ class CloudClient:
         action = data.get("action")
         print(f"📩 Verified cloud command: {action}")
 
-        if action == "lock":
-            self.core.lock()
-        elif action == "unlock":
-            self.core.unlock()
-        elif action == "freeze_overlay":
-            self.core.freeze_only()
-        elif action == "volume_up":
-            self.core.system_utils.volume_up()
-        elif action == "volume_down":
-            self.core.system_utils.volume_down()
-        elif action == "set_volume":
-            level = data.get("value")
-            if level is not None:
-                self.core.system_utils.set_volume(int(level))
-        elif action == "mute":
-            self.core.system_utils.mute()
-        elif action == "shutdown":
-            self.core.system_utils.shutdown(confirm=True)
-        elif action == "restart":
-            self.core.system_utils.restart(confirm=True)
-        elif action == "clear_intruder_logs":
-            self.core.intruder_detector.clear_all_logs()
-        elif action == "brightness_up":
-            self.core.system_utils.brightness_up()
-        elif action == "brightness_down":
-            self.core.system_utils.brightness_down()
-        elif action == "wifi_on":
-            self.core.system_utils.wifi_on()
-        elif action == "wifi_off":
-            self.core.system_utils.wifi_off()
-        elif action == "bluetooth_on":
-            self.core.system_utils.bluetooth_on()
-        elif action == "bluetooth_off":
-            self.core.system_utils.bluetooth_off()
-        elif action in ("start_camera", "start_live_camera"):
-            self.core.start_live_camera()
-        elif action in ("stop_camera", "stop_live_camera"):
-            self.core.stop_live_camera()
-        elif action == "camera_status":
-            print(self.core.is_camera_running())
-        else:
-            print("⚠️ Unknown action:", action)
+        try:
+            if action == "lock":
+                self.core.lock()
+            elif action == "unlock":
+                self.core.unlock()
+            elif action == "freeze_overlay":
+                self.core.freeze_only()
+            elif action == "volume_up":
+                self.core.system_utils.volume_up()
+            elif action == "volume_down":
+                self.core.system_utils.volume_down()
+            elif action == "set_volume":
+                level = data.get("value")
+                if level is not None:
+                    self.core.system_utils.set_volume(int(level))
+            elif action == "mute":
+                self.core.system_utils.mute()
+            elif action == "unmute":
+                self.core.system_utils.unmute()
+            elif action == "shutdown":
+                self.core.system_utils.shutdown(confirm=True)
+            elif action == "restart":
+                self.core.system_utils.restart(confirm=True)
+            elif action == "clear_intruder_logs":
+                self.core.intruder_detector.clear_all_logs()
+            elif action == "brightness_up":
+                self.core.system_utils.brightness_up()
+            elif action == "brightness_down":
+                self.core.system_utils.brightness_down()
+            elif action == "set_brightness":
+                level = data.get("value")
+                if level is not None:
+                    self.core.system_utils.set_brightness(int(level))
+            elif action == "wifi_on":
+                self.core.system_utils.wifi_on()
+            elif action == "wifi_off":
+                self.core.system_utils.wifi_off()
+            elif action == "bluetooth_on":
+                self.core.system_utils.bluetooth_on()
+            elif action == "bluetooth_off":
+                self.core.system_utils.bluetooth_off()
+            elif action in ("start_camera", "start_live_camera"):
+                await asyncio.to_thread(self.core.start_live_camera)
+            elif action in ("stop_camera", "stop_live_camera"):
+                self.core.stop_live_camera()
+            elif action == "camera_status":
+                print(self.core.is_camera_running())
+            else:
+                print("⚠️ Unknown action:", action)
+                return
+
+            # THE FIX (restored): confirm we actually ran it, so the
+            # phone doesn't just time out believing nothing happened.
+            await self._send_ack(action, success=True)
+
+        except Exception as e:
+            print(f"❌ Command execution failed: {e}")
+            await self._send_ack(action, success=False, error=str(e))
+
+    async def _send_ack(self, action, success, error=None):
+        if not self.websocket:
+            return
+        try:
+            await self.websocket.send(json.dumps({
+                "type": "command_ack", "action": action,
+                "success": success, "error": error,
+            }))
+        except Exception as e:
+            print(f"⚠️ Could not send ack: {e}")
+
+    def push_volume_change(self, volume_percent, muted):
+        """Called by VolumeWatcher's background thread whenever
+        Windows' volume changes for ANY reason — pushes it through
+        the relay so your phone's overlay can auto-appear."""
+        if not self.websocket or not self._event_loop:
+            return
+        device_id, _ = self._get_device_info()
+        if not device_id:
+            return
+        try:
+            asyncio.run_coroutine_threadsafe(
+                self.websocket.send(json.dumps({
+                    "type": "volume_changed",
+                    "device_id": device_id,
+                    "volume": volume_percent,
+                    "muted": muted,
+                })),
+                self._event_loop,
+            )
+        except Exception as e:
+            print(f"⚠️ Could not push volume change: {e}")
 
     def stop(self):
         self.running = False

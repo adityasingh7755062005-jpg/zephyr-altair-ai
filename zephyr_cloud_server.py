@@ -312,9 +312,9 @@ async def ws(socket: WebSocket):
                 action = msg.get("action")
                 ALLOWED_ACTIONS = {
                     "lock", "unlock", "start_camera", "stop_camera",
-                    "freeze_overlay", "volume_up", "volume_down", "mute", "set_volume",
+                    "freeze_overlay", "volume_up", "volume_down", "mute", "unmute", "set_volume",
                     "shutdown", "restart", "clear_intruder_logs",
-                    "brightness_up", "brightness_down", "wifi_on", "wifi_off",
+                    "brightness_up", "brightness_down", "set_brightness", "wifi_on", "wifi_off",
                     "bluetooth_on", "bluetooth_off",
                 }
                 if action not in ALLOWED_ACTIONS:
@@ -387,6 +387,25 @@ async def ws(socket: WebSocket):
                 # specific mobile client that requested it.
                 request_id = msg.get("request_id")
                 mobile = pending_data_requests.pop(request_id, None)
+                if mobile:
+                    await safe_send(mobile, raw)
+
+            elif msg_type == "command_ack":
+                # RESTORED — this was missing, meaning every cloud
+                # command silently timed out on the phone even when
+                # it actually succeeded. Relayed straight from the
+                # desktop that executed it, back to the phone waiting.
+                ack_device_id = msg.get("device_id") or device_id
+                mobile = mobile_clients.get(ack_device_id)
+                if mobile:
+                    await safe_send(mobile, raw)
+
+            elif msg_type == "volume_changed":
+                # Real-time push from the laptop's VolumeWatcher —
+                # broadcast to whichever phone is currently connected
+                # for this device, so the overlay can auto-appear.
+                push_device_id = msg.get("device_id") or device_id
+                mobile = mobile_clients.get(push_device_id)
                 if mobile:
                     await safe_send(mobile, raw)
 

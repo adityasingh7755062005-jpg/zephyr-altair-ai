@@ -159,6 +159,11 @@ class LocalServer:
             return await self._guarded(dict(request.query_params),
                                        self.core.system_utils.mute, "mute")
 
+        @self.app.api_route("/unmute", methods=["GET", "POST"])
+        async def unmute(request: Request):
+            return await self._guarded(dict(request.query_params),
+                                       self.core.system_utils.unmute, "unmute")
+
         # ---- POWER (confirmation already done in the phone app UI) ----
         @self.app.api_route("/shutdown", methods=["GET", "POST"])
         async def shutdown(request: Request):
@@ -224,7 +229,26 @@ class LocalServer:
                 return JSONResponse(status_code=400, content={"error": "level required"})
             return self.core.system_utils.set_volume(int(level))
 
-        # ---- BRIGHTNESS ----
+        # ---- ABSOLUTE BRIGHTNESS (for the drag slider) ----
+        @self.app.api_route("/get_brightness", methods=["GET", "POST"])
+        async def get_brightness(request: Request):
+            params = dict(request.query_params)
+            valid, msg = self.verify(params)
+            if not valid:
+                return JSONResponse(status_code=403, content={"error": msg})
+            return self.core.system_utils.get_brightness()
+
+        @self.app.api_route("/set_brightness", methods=["GET", "POST"])
+        async def set_brightness(request: Request):
+            params = dict(request.query_params)
+            valid, msg = self.verify(params)
+            if not valid:
+                return JSONResponse(status_code=403, content={"error": msg})
+            level = params.get("level")
+            if level is None:
+                return JSONResponse(status_code=400, content={"error": "level required"})
+            return self.core.system_utils.set_brightness(int(level))
+
         @self.app.api_route("/brightness_up", methods=["GET", "POST"])
         async def brightness_up(request: Request):
             return await self._guarded(dict(request.query_params),
