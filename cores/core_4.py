@@ -1,5 +1,6 @@
 # cores/core_4.py
 # Core 4 - Command Router — Hardened v2 (delegates ALL text to Core 8)
+# + Core 19 (Ethics & Rules) wired into the permission gate
 
 from datetime import datetime
 
@@ -36,27 +37,29 @@ class Core4CommandRouter:
     INFO_INTENTS = {"time", "date", "greeting"}
 
     def __init__(self, system_utils=None, response_engine=None, automation_engine=None,
-                 behavior_engine=None, personality_engine=None):
+                 behavior_engine=None, personality_engine=None, ethics_engine=None):
         self.system_utils = system_utils
         self.response_engine = response_engine  # Core 8 instance
         self.automation_engine = automation_engine  # Core 9 instance
         self.behavior_engine = behavior_engine  # Core 10 instance
         self.personality_engine = personality_engine  # Core 17 instance
+        self.ethics_engine = ethics_engine  # Core 19 instance
         print("[Core 4] Command router initialized (Hardened v2)")
 
     # --------------------------------------------------
-    # PERMISSION HOOK (placeholder — Core 18/19 plug in here)
+    # PERMISSION HOOK
     # --------------------------------------------------
     def _is_permitted(self, intent: str, packet: dict) -> bool:
-        # Core 10 (Behavior & Decision Engine) — real check now wired in.
-        # TODO: Core 18 (security/trust) and Core 19 (ethics/state) will
-        # add further checks alongside this once built.
-        if self.behavior_engine is None:
-            return True  # no behavior engine connected — fail open (dev/testing only)
-
-        text = packet.get("text", "") or ""
-        result = self.behavior_engine.is_allowed(intent, text)
-        return result["allowed"]
+        # Core 10 (Behavior & Decision Engine) — real check.
+        if self.behavior_engine is not None:
+            text = packet.get("text", "") or ""
+            result = self.behavior_engine.is_allowed(intent, text)
+            if not result["allowed"]:
+                return False
+        # Core 18 (security/trust) checks happen upstream of Core 4
+        # entirely — this pipeline only runs for the voice/text path,
+        # which Core 18 already gates via freeze/lock state.
+        return True  # Core 19's tier check happens separately, in route()
 
     # --------------------------------------------------
     # Main public method
@@ -81,6 +84,30 @@ class Core4CommandRouter:
         identity = packet.get("identity", "unknown")  # set by Core 18 once it exists
         private_mode = packet.get("private_mode", False)  # safe default
         nudge_lines = []
+
+        # ---- Core 19: reply to a pending confirmation bypasses
+        # normal intent routing entirely — same position/priority as
+        # Core 10's dev-mode code check below, since "yes"/"no" isn't
+        # a real intent Core 3 would classify meaningfully anyway. ----
+        if self.ethics_engine and self.ethics_engine.has_pending_confirmation():
+            result = self.ethics_engine.resolve_confirmation_reply(text)
+
+            if result["outcome"] == "confirmed":
+                confirmed_intent = result["intent"]
+                confirmed_packet = result["packet"]
+                print(f"[Core 4] Confirmed by user -> executing '{confirmed_intent}'")
+                return self._execute_confirmed(confirmed_intent, confirmed_packet)
+
+            if result["outcome"] == "cancelled":
+                return self._finish("action_cancelled", {}, packet, executed=False, blocked_reason="user_cancelled")
+
+            # "unclear" — didn't sound like yes or no, ask again rather
+            # than silently dropping the pending confirmation.
+            question = self.ethics_engine._confirmation_question(
+                self.ethics_engine.pending_confirmation["intent"]
+            )
+            return self._finish("clarify_confirmation", {"question": question}, packet,
+                                 executed=False, blocked_reason="awaiting_confirmation")
 
         # ---- Core 17: Zephyr override check (highest priority, every turn) ----
         if self.personality_engine and text:
@@ -131,10 +158,28 @@ class Core4CommandRouter:
             print(f"[Core 4] Low confidence ({confidence}) for intent '{intent}' — asking for clarification")
             return self._finish("low_confidence", {}, packet, executed=False, blocked_reason="low_confidence")
 
-        # ---- Permission gate (Core 18/19 will plug in here) ----
+        # ---- Permission gate (Core 10 behavior check) ----
         if not self._is_permitted(intent, packet):
             print(f"[Core 4] Blocked by permission gate: {intent}")
             return self._finish("permission_denied", {}, packet, executed=False, blocked_reason="permission_denied")
+
+        # ---- Core 19: tier check. Tier 0/1 falls through immediately
+        # (return value ignored below); Tier 2/3 short-circuits here
+        # and asks for confirmation instead of executing. ----
+        if self.ethics_engine:
+            tier_result = self.ethics_engine.check(intent, packet)
+            if tier_result["decision"] == "confirm_needed":
+                return self._finish("confirm_needed", {"question": tier_result["question"]}, packet,
+                                     executed=False, blocked_reason="awaiting_confirmation")
+
+        return self._route_action(intent, packet, text)
+
+    # --------------------------------------------------
+    # Everything past the permission/tier gates — shared by both the
+    # normal path and the "user just confirmed a Tier 2/3 action" path.
+    # --------------------------------------------------
+    def _route_action(self, intent: str, packet: dict, text: str) -> dict:
+        confidence = packet.get("confidence", 0.0)
 
         # ---- Info intents: gather data, let Core 8 phrase it ----
         if intent == "time":
@@ -146,11 +191,14 @@ class Core4CommandRouter:
         if intent == "greeting":
             return self._finish("greeting", {}, packet, executed=True, blocked_reason=None)
 
-        # ---- Exit: NEVER auto-shutdown from a single command.
-        # Core 8 will phrase this as a confirmation request. Actual
-        # shutdown must go through Core 5's confirm-gated shutdown(),
-        # triggered separately after the user confirms.
+        # ---- Exit: now flows through Core 19's Tier 2 confirmation
+        # (see intent_tiers in core_19.py) instead of this ad-hoc
+        # special case. Kept as a safety net only if ethics_engine
+        # isn't connected for some reason (dev/testing).
         if intent == "exit_assistant":
+            if self.ethics_engine:
+                return self._finish("action_failed", {"error": "exit should have been gated by Core 19"},
+                                     packet, executed=False, blocked_reason="internal_error")
             return self._finish("exit_assistant", {}, packet, executed=False, blocked_reason="needs_confirmation")
 
         # ---- Reminder scheduling: delegate to Core 9 ----
@@ -181,6 +229,19 @@ class Core4CommandRouter:
 
         # ---- Recognized-but-unrouted intent ----
         return self._finish("unknown", {}, packet, executed=False, blocked_reason="unrouted_intent")
+
+    def _execute_confirmed(self, intent: str, packet: dict) -> dict:
+        """Called once Core 19 has confirmed a Tier 2/3 action — runs
+        the SAME execution path as a normal action, just entered from
+        the confirmation reply instead of a fresh command."""
+        text = (packet.get("text") or "").strip()
+
+        if intent == "exit_assistant":
+            if self.system_utils:
+                self.system_utils.shutdown(confirm=True)
+            return self._finish("exit_assistant", {}, packet, executed=True, blocked_reason=None)
+
+        return self._route_action(intent, packet, text)
 
     # --------------------------------------------------
     # Execution helper
@@ -240,41 +301,3 @@ class Core4CommandRouter:
             "executed": True,
             "blocked_reason": None,
         }
-
-
-# --------------------------------------------------
-# Example usage
-# --------------------------------------------------
-if __name__ == "__main__":
-    from core8_response_engine import Core8ResponseEngine
-
-    router = Core4CommandRouter(system_utils=None, response_engine=Core8ResponseEngine())
-
-    # "what's the update status" — should NOT falsely match "date" anymore
-    # (word-boundary matching now lives entirely in Core 3, already fixed there)
-    packet_1 = {
-        "success": True, "text": "what's the update status", "language": "en",
-        "intent": "unknown", "confidence": 0.0,
-    }
-    print(router.route(packet_1))
-
-    # Real time intent, from Core 3
-    packet_2 = {
-        "success": True, "text": "what's the time", "language": "en",
-        "intent": "time", "confidence": 1.0,
-    }
-    print(router.route(packet_2))
-
-    # Real action intent
-    packet_3 = {
-        "success": True, "text": "turn off the lights please", "language": "en",
-        "intent": "lights_off", "confidence": 0.6,
-    }
-    print(router.route(packet_3))
-
-    # Exit — should ask for confirmation, NOT actually shut down
-    packet_4 = {
-        "success": True, "text": "exit now", "language": "en",
-        "intent": "exit_assistant", "confidence": 1.0,
-    }
-    print(router.route(packet_4))

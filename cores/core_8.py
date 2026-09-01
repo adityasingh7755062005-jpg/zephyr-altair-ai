@@ -3,6 +3,7 @@
 # Core 8 – Response Engine — Hardened
 # Sole owner of ALL user-facing response text.
 # Core 4 executes actions; Core 8 decides what to say about them.
+# + Core 19's confirmation-flow responses (new)
 # =========================
 
 import datetime
@@ -68,6 +69,10 @@ class Core8ResponseEngine:
             "low_confidence": self._unknown,
             "permission_denied": self._permission_denied,
             "action_failed": self._action_failed,
+            # ---- Core 19 (Ethics & Rules) confirmation flow ----
+            "confirm_needed": self._confirm_needed,
+            "clarify_confirmation": self._clarify_confirmation,
+            "action_cancelled": self._action_cancelled,
         }
 
     def _time(self, data, language):
@@ -175,6 +180,27 @@ class Core8ResponseEngine:
             "hi": f"Yeh nahi ho paya: {error}",
         }[language]
 
+    # --------------------------------------------------
+    # Core 19 (Ethics & Rules) — confirmation flow
+    # --------------------------------------------------
+    def _confirm_needed(self, data, language):
+        # Core 19 already phrases the full question itself (same
+        # rationale as dev-mode messages above — confirmation wording
+        # around a real action shouldn't be re-generated/translated
+        # automatically), so this is a straight passthrough.
+        return data.get("question", "")
+
+    def _clarify_confirmation(self, data, language):
+        # Reply didn't clearly sound like yes or no — repeat the
+        # original question rather than silently drop it.
+        return data.get("question", "")
+
+    def _action_cancelled(self, data, language):
+        return {
+            "en": "Okay, cancelled.",
+            "hi": "Theek hai, cancel kar diya.",
+        }[language]
+
 
 # --------------------------------------------------
 # Example usage
@@ -198,3 +224,9 @@ if __name__ == "__main__":
     print(engine.generate_response("low_confidence", language="en"))
     print(engine.generate_response("permission_denied", language="hi"))
     print(engine.generate_response("exit_assistant", language="en"))
+    print(engine.generate_response(
+        "confirm_needed",
+        data={"question": "Are you sure you want to exit assistant? Say yes to confirm, or no to cancel."},
+        language="en"
+    ))
+    print(engine.generate_response("action_cancelled", language="en"))
