@@ -207,9 +207,9 @@ class CloudClient:
             elif action == "unlock":
                 self.core.unlock()
             elif action == "start_sibling_session":
-                self.core.unlock_as_sibling()
+                self.core.start_sibling_session()
             elif action == "start_guest_session":
-                self.core.unlock_as_guest()
+                self.core.start_guest_session()
             elif action == "clear_sibling_history":
                 self.core.usage_tracker.clear_history("sibling")
             elif action == "clear_guest_history":

@@ -171,20 +171,15 @@ class Core18:
         # Owner reclaiming full access ends any Sibling/Guest session.
         self.usage_tracker.end_session()
 
-    # ---- Sibling / Guest sessions (new) ----
-    def unlock_as_sibling(self):
-        """Dismisses the freeze overlay AND starts tracking which
-        apps get used during this session — same physical unlock,
-        different phone button, different intent."""
-        self.security_state = SecurityState.UNLOCKED
-        self.freeze_overlay.hide()
-        self.intruder_detector.disable()
+    # ---- Sibling / Guest sessions ----
+    # Deliberately separate from unlock() entirely — whoever's at the
+    # laptop already got in via the normal Unlock button (same flow
+    # for anyone). These purely flag "start tracking from here,"
+    # whenever you decide who it's for — same moment or a minute later.
+    def start_sibling_session(self):
         self.usage_tracker.start_session("sibling")
 
-    def unlock_as_guest(self):
-        self.security_state = SecurityState.UNLOCKED
-        self.freeze_overlay.hide()
-        self.intruder_detector.disable()
+    def start_guest_session(self):
         self.usage_tracker.start_session("guest")
 
     # ---- Camera methods unchanged from before — see camera core

@@ -87,12 +87,12 @@ class LocalServer:
         @self.app.api_route("/start_sibling_session", methods=["GET", "POST"])
         async def start_sibling_session(request: Request):
             return await self._guarded(dict(request.query_params),
-                                       self.core.unlock_as_sibling, "sibling_session_started")
+                                       self.core.start_sibling_session, "sibling_session_started")
 
         @self.app.api_route("/start_guest_session", methods=["GET", "POST"])
         async def start_guest_session(request: Request):
             return await self._guarded(dict(request.query_params),
-                                       self.core.unlock_as_guest, "guest_session_started")
+                                       self.core.start_guest_session, "guest_session_started")
 
         @self.app.api_route("/get_sibling_history", methods=["GET", "POST"])
         async def get_sibling_history(request: Request):
