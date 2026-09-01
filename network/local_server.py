@@ -1,6 +1,7 @@
 # network/local_server.py
 # Merged: real per-device secret verification (from the security
-# rebuild) + your new intruder logs endpoint, plus a real delete route.
+# rebuild) + your new intruder logs endpoint, plus a real delete route
+# + Sibling/Guest session start and history routes (new)
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -81,6 +82,45 @@ class LocalServer:
         @self.app.api_route("/unlock", methods=["GET", "POST"])
         async def unlock(request: Request):
             return await self._guarded(dict(request.query_params), self.core.unlock, "unlocked")
+
+        # ---- SIBLING / GUEST SESSIONS (new) ----
+        @self.app.api_route("/start_sibling_session", methods=["GET", "POST"])
+        async def start_sibling_session(request: Request):
+            return await self._guarded(dict(request.query_params),
+                                       self.core.unlock_as_sibling, "sibling_session_started")
+
+        @self.app.api_route("/start_guest_session", methods=["GET", "POST"])
+        async def start_guest_session(request: Request):
+            return await self._guarded(dict(request.query_params),
+                                       self.core.unlock_as_guest, "guest_session_started")
+
+        @self.app.api_route("/get_sibling_history", methods=["GET", "POST"])
+        async def get_sibling_history(request: Request):
+            params = dict(request.query_params)
+            valid, msg = self.verify(params)
+            if not valid:
+                return JSONResponse(status_code=403, content={"error": msg})
+            return {"status": "ok", "entries": self.core.usage_tracker.get_history("sibling")}
+
+        @self.app.api_route("/get_guest_history", methods=["GET", "POST"])
+        async def get_guest_history(request: Request):
+            params = dict(request.query_params)
+            valid, msg = self.verify(params)
+            if not valid:
+                return JSONResponse(status_code=403, content={"error": msg})
+            return {"status": "ok", "entries": self.core.usage_tracker.get_history("guest")}
+
+        @self.app.api_route("/clear_sibling_history", methods=["GET", "POST"])
+        async def clear_sibling_history(request: Request):
+            return await self._guarded(dict(request.query_params),
+                                       lambda: self.core.usage_tracker.clear_history("sibling"),
+                                       "sibling_history_cleared")
+
+        @self.app.api_route("/clear_guest_history", methods=["GET", "POST"])
+        async def clear_guest_history(request: Request):
+            return await self._guarded(dict(request.query_params),
+                                       lambda: self.core.usage_tracker.clear_history("guest"),
+                                       "guest_history_cleared")
 
         # ---- CAMERA ----
         @self.app.api_route("/start_camera", methods=["GET", "POST"])

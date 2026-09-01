@@ -1,5 +1,6 @@
 # cores/core_18.py
 # HARDENED — wires in real pairing, passes credentials through properly
+# + Sibling/Guest usage history tracking (new)
 
 from cores.core_18_security_state import SecurityState
 from cores.trusted_device_manager import TrustedDeviceManager
@@ -8,6 +9,7 @@ from cores.core_18_login_watcher import LoginWatcher
 from cores.core_18_session_watcher import SessionWatcher
 from cores.core_18_freeze_overlay import FreezeOverlay
 from cores.core_18_intruder_detector import IntruderDetector
+from cores.core_18_usage_tracker import UsageHistoryTracker
 from cores.core_7 import Core7VoiceOutput
 from cores.core_5 import Core5SystemUtils
 
@@ -49,6 +51,16 @@ class Core18:
                 self.trusted_device_manager, voice_output=self.voice_output
             )
 
+            # Sibling/Guest usage history — tracks which app is
+            # actively used during a Sibling or Guest session and
+            # pushes each new entry live to the phone. push_callback
+            # is a bound method reference, so it's fine that
+            # self.cloud doesn't exist yet at this exact line — it
+            # only gets called later, once the tracker's background
+            # thread detects an app change, by which point self.cloud
+            # is set below.
+            self.usage_tracker = UsageHistoryTracker(push_callback=self._push_usage_event)
+
             start_local_server(self)
             start_local_discovery()
             self.connection = ConnectionManager()
@@ -68,6 +80,16 @@ class Core18:
         print("✅ Core 18 initialized (real per-device authentication active)")
         if not self.trusted_device_manager.load():
             print("⚠️ No device paired yet. Trigger pairing to connect your phone.")
+
+    def _push_usage_event(self, event_type: str, payload: dict):
+        """Forwards a new Sibling/Guest history entry to the phone in
+        real time, reusing the exact same push mechanism as the
+        system dashboard and volume/brightness live sync."""
+        try:
+            if hasattr(self, "cloud") and self.cloud:
+                self.cloud._push_state_change(event_type, payload)
+        except Exception as e:
+            print(f"[Core 18] Usage push failed: {e}")
 
     def _on_desktop_ready(self):
         # First-run setup case: if no device has EVER been paired,
@@ -94,6 +116,10 @@ class Core18:
         self.security_state = SecurityState.LOCKED
         self.freeze_overlay.show()
         self.intruder_detector.enable()
+        # A new lock means whoever was using the laptop is done —
+        # end any active Sibling/Guest tracking session so the next
+        # person needs a fresh grant from the phone.
+        self.usage_tracker.end_session()
 
     def _on_windows_unlock(self):
         print("[Core 18] Windows Unlocked")
@@ -122,6 +148,7 @@ class Core18:
         self.security_state = SecurityState.LOCKED
         self.freeze_overlay.show(locked=True)
         self.intruder_detector.enable()
+        self.usage_tracker.end_session()
         try:
             ctypes.windll.user32.LockWorkStation()
         except Exception as e:
@@ -141,6 +168,24 @@ class Core18:
         self.security_state = SecurityState.UNLOCKED
         self.freeze_overlay.hide()
         self.intruder_detector.disable()
+        # Owner reclaiming full access ends any Sibling/Guest session.
+        self.usage_tracker.end_session()
+
+    # ---- Sibling / Guest sessions (new) ----
+    def unlock_as_sibling(self):
+        """Dismisses the freeze overlay AND starts tracking which
+        apps get used during this session — same physical unlock,
+        different phone button, different intent."""
+        self.security_state = SecurityState.UNLOCKED
+        self.freeze_overlay.hide()
+        self.intruder_detector.disable()
+        self.usage_tracker.start_session("sibling")
+
+    def unlock_as_guest(self):
+        self.security_state = SecurityState.UNLOCKED
+        self.freeze_overlay.hide()
+        self.intruder_detector.disable()
+        self.usage_tracker.start_session("guest")
 
     # ---- Camera methods unchanged from before — see camera core
     # rebuild for when we get to those files ----

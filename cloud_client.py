@@ -2,6 +2,7 @@
 # HARDENED — registers with the REAL secret (not just a claimed ID),
 # and independently re-checks every command before executing it —
 # so even a compromised relay can't forge actions on its own.
+# + Sibling/Guest session commands and history data requests (new)
 
 import asyncio, websockets, json, threading, traceback, time
 import requests
@@ -155,7 +156,7 @@ class CloudClient:
             self._system_monitoring_active = False
             return
 
-        # ---- Data request from relay (battery, system_info) ----
+        # ---- Data request from relay (battery, system_info, histories) ----
         if msg_type == "data_request":
             request_id = data.get("request_id")
             request_type = data.get("request_type")
@@ -175,6 +176,10 @@ class CloudClient:
                 result = self.core.system_utils.get_wifi_state()
             elif request_type == "get_bluetooth_state":
                 result = self.core.system_utils.get_bluetooth_state()
+            elif request_type == "sibling_history":
+                result = {"success": True, "entries": self.core.usage_tracker.get_history("sibling")}
+            elif request_type == "guest_history":
+                result = {"success": True, "entries": self.core.usage_tracker.get_history("guest")}
             else:
                 result = {"success": False, "error": f"Unknown request type: {request_type}"}
 
@@ -201,6 +206,14 @@ class CloudClient:
                 self.core.lock()
             elif action == "unlock":
                 self.core.unlock()
+            elif action == "start_sibling_session":
+                self.core.unlock_as_sibling()
+            elif action == "start_guest_session":
+                self.core.unlock_as_guest()
+            elif action == "clear_sibling_history":
+                self.core.usage_tracker.clear_history("sibling")
+            elif action == "clear_guest_history":
+                self.core.usage_tracker.clear_history("guest")
             elif action == "freeze_overlay":
                 self.core.freeze_only()
             elif action == "volume_up":
@@ -268,9 +281,10 @@ class CloudClient:
 
     def _push_state_change(self, event_type: str, payload: dict):
         """Generalized version of push_volume_change — used by the
-        background watcher for volume, brightness, WiFi, and Bluetooth
-        alike. Called from a background thread, so it schedules onto
-        the real event loop via run_coroutine_threadsafe."""
+        background watcher for volume, brightness, WiFi, Bluetooth,
+        system stats, and now Sibling/Guest usage history alike.
+        Called from a background thread, so it schedules onto the
+        real event loop via run_coroutine_threadsafe."""
         if not self.websocket or not self._event_loop:
             return
         device_id, _ = self._get_device_info()
