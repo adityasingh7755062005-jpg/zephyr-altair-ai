@@ -14,3 +14,5 @@ venv/lib/site-packages/pip/_internalutils/misc.py
 venv/lib/site-packages/pip/_internalutils/models.py
 venv/lib/site-packages/pip/_internalutils/packaging.py
 venv/lib/site-packages/pip/_internalutils/setuptools_build.py
+data/security/guest_history.json
+data/security/sibling_history.json
