@@ -1,8 +1,11 @@
 # zephyr_cloud_server.py
 # Full current state — real per-device signatures on every privileged
 # message, intruder log storage + FCM push, health check keep-alive
-# target, and now camera_auth requires a real signature too (was
-# previously just checking the device_id existed, no signature check).
+# target, camera_auth requires a real signature.
+# + Sibling/Guest actions and push types (FIXED — these were missing
+#   entirely, meaning those features silently failed over cloud/away
+#   from home WiFi even though they worked fine on local network)
+# + Two-factor self-upgrade phone confirmation (new)
 
 import json, os, time, shutil, threading
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, Form
@@ -316,6 +319,13 @@ async def ws(socket: WebSocket):
                     "shutdown", "restart", "clear_intruder_logs",
                     "brightness_up", "brightness_down", "set_brightness", "wifi_on", "wifi_off",
                     "bluetooth_on", "bluetooth_off",
+                    # FIXED — these were missing entirely, so Sibling/
+                    # Guest silently failed whenever routed through
+                    # cloud instead of local network.
+                    "start_sibling_session", "start_guest_session",
+                    "clear_sibling_history", "clear_guest_history",
+                    # New — two-factor self-upgrade phone confirmation
+                    "confirm_upgrade", "deny_upgrade",
                 }
                 if action not in ALLOWED_ACTIONS:
                     print(f"❌ COMMAND REJECTED: unknown action '{action}'")
@@ -324,11 +334,14 @@ async def ws(socket: WebSocket):
                 target = msg.get("target")
                 desktop = desktop_clients.get(target)
                 if desktop:
-                    # Forward "value" too, if present — needed for
-                    # set_volume and any future parameterized command.
+                    # Forward "value" and "request_id" too, if present
+                    # — needed for set_volume/set_brightness (value)
+                    # and confirm_upgrade/deny_upgrade (request_id).
                     forward = {"type": "command", "action": action}
                     if "value" in msg:
                         forward["value"] = msg["value"]
+                    if "request_id" in msg:
+                        forward["request_id"] = msg["request_id"]
                     await safe_send(desktop, json.dumps(forward))
                     print(f"✅ Forwarded verified command: {action}")
 
@@ -391,20 +404,24 @@ async def ws(socket: WebSocket):
                     await safe_send(mobile, raw)
 
             elif msg_type == "command_ack":
-                # RESTORED — this was missing, meaning every cloud
-                # command silently timed out on the phone even when
-                # it actually succeeded. Relayed straight from the
-                # desktop that executed it, back to the phone waiting.
+                # Relayed straight from the desktop that executed it,
+                # back to the phone waiting on it.
                 ack_device_id = msg.get("device_id") or device_id
                 mobile = mobile_clients.get(ack_device_id)
                 if mobile:
                     await safe_send(mobile, raw)
 
             elif msg_type in ("volume_changed", "brightness_changed", "wifi_changed",
-                              "bluetooth_changed", "system_stats"):
-                # Real-time push from the laptop's background state
-                # watcher — broadcast to whichever phone is currently
-                # connected for this device, so it updates live.
+                              "bluetooth_changed", "system_stats",
+                              # FIXED — these were missing entirely, so
+                              # Sibling/Guest live history updates
+                              # never reached the phone over cloud.
+                              "sibling_app_opened", "guest_app_opened",
+                              # New — the actual upgrade confirmation push
+                              "upgrade_confirmation_needed"):
+                # Real-time push from the laptop — broadcast to
+                # whichever phone is currently connected for this
+                # device, so it updates live.
                 push_device_id = msg.get("device_id") or device_id
                 mobile = mobile_clients.get(push_device_id)
                 if mobile:

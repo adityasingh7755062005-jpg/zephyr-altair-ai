@@ -2,7 +2,8 @@
 # HARDENED — registers with the REAL secret (not just a claimed ID),
 # and independently re-checks every command before executing it —
 # so even a compromised relay can't forge actions on its own.
-# + Sibling/Guest session commands and history data requests (new)
+# + Sibling/Guest session commands and history data requests
+# + Two-factor phone confirmation for self-upgrade (new)
 
 import asyncio, websockets, json, threading, traceback, time
 import requests
@@ -214,6 +215,10 @@ class CloudClient:
                 self.core.usage_tracker.clear_history("sibling")
             elif action == "clear_guest_history":
                 self.core.usage_tracker.clear_history("guest")
+            elif action == "confirm_upgrade":
+                self._handle_upgrade_confirm(data.get("request_id"))
+            elif action == "deny_upgrade":
+                self._handle_upgrade_deny(data.get("request_id"))
             elif action == "freeze_overlay":
                 self.core.freeze_only()
             elif action == "volume_up":
@@ -268,6 +273,47 @@ class CloudClient:
             print(f"❌ Command execution failed: {e}")
             await self._send_ack(action, success=False, error=str(e))
 
+    # ---- Two-factor self-upgrade phone confirmation (new) ----
+    #
+    # Defensive: Core 20 (self-upgrade) and the orchestrator that
+    # would actually TRIGGER an upgrade request aren't wired into a
+    # live pipeline yet (per the "build each core standalone, wire
+    # everything at the end" plan). These handlers use getattr()
+    # rather than assuming self.core.self_upgrade exists yet, so
+    # nothing crashes in the meantime — they just report that
+    # self-upgrade isn't wired in yet, instead of raising.
+    def _handle_upgrade_confirm(self, request_id):
+        self_upgrade = getattr(self.core, "self_upgrade", None)
+        if not self_upgrade:
+            print("⚠️ confirm_upgrade received, but Core 20 isn't wired into Core 18 yet")
+            return
+        result = self_upgrade.confirm_from_phone(request_id)
+        print(f"[Upgrade] Phone confirmed: {result}")
+
+    def _handle_upgrade_deny(self, request_id):
+        self_upgrade = getattr(self.core, "self_upgrade", None)
+        if not self_upgrade:
+            print("⚠️ deny_upgrade received, but Core 20 isn't wired into Core 18 yet")
+            return
+        result = self_upgrade.deny_from_phone(request_id)
+        print(f"[Upgrade] Phone denied: {result}")
+
+        # An explicit "No, it's not me" is a deliberate security
+        # signal — lock the laptop and start intruder detection,
+        # same response as any other unauthorized-access scenario.
+        if result.get("should_escalate"):
+            print("🚨 Unauthorized self-upgrade attempt — locking and enabling intruder detection")
+            self.core.lock()
+            if hasattr(self.core, "intruder_detector"):
+                self.core.intruder_detector.enable()
+
+    def push_upgrade_confirmation_request(self, push_payload: dict):
+        """Called once Core 19's SPOKEN confirmation has already
+        been answered 'yes' for a self-upgrade action — pushes the
+        real, final confirmation request to the phone. The upgrade
+        does NOT happen until the phone answers."""
+        self._push_state_change("upgrade_confirmation_needed", push_payload)
+
     async def _send_ack(self, action, success, error=None):
         if not self.websocket:
             return
@@ -282,9 +328,10 @@ class CloudClient:
     def _push_state_change(self, event_type: str, payload: dict):
         """Generalized version of push_volume_change — used by the
         background watcher for volume, brightness, WiFi, Bluetooth,
-        system stats, and now Sibling/Guest usage history alike.
-        Called from a background thread, so it schedules onto the
-        real event loop via run_coroutine_threadsafe."""
+        system stats, Sibling/Guest usage history, and now upgrade
+        confirmation requests alike. Called from a background thread,
+        so it schedules onto the real event loop via
+        run_coroutine_threadsafe."""
         if not self.websocket or not self._event_loop:
             return
         device_id, _ = self._get_device_info()
