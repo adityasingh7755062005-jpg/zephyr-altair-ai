@@ -69,6 +69,10 @@ class Core8ResponseEngine:
             "low_confidence": self._unknown,
             "permission_denied": self._permission_denied,
             "action_failed": self._action_failed,
+            # Generic "the action succeeded" key — used by Core 4 when
+            # reporting a confirmed Tier 2/3 action actually completing,
+            # rather than reusing an intent key written for ASKING.
+            "action_result": self._action_result,
             # ---- Core 19 (Ethics & Rules) confirmation flow ----
             "confirm_needed": self._confirm_needed,
             "clarify_confirmation": self._clarify_confirmation,

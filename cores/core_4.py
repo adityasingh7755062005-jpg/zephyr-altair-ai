@@ -17,7 +17,12 @@ class Core4CommandRouter:
       strings itself
     """
 
-    CONFIDENCE_THRESHOLD = 0.5
+    # FIXED: was 0.5, which rejected perfectly clear commands. Core 3
+    # computes confidence as (matched keywords / total words), so a
+    # normal phrasing like "what's the time" scores 1/3 = 0.33 and was
+    # being thrown out. 0.3 accepts real single-keyword intents while
+    # still rejecting genuine non-matches (which score 0.0).
+    CONFIDENCE_THRESHOLD = 0.3
 
     # Which intents map to a real system_utils call, and a human label
     # Core 8 can use in "Done — {label}" style responses.
@@ -237,9 +242,17 @@ class Core4CommandRouter:
         text = (packet.get("text") or "").strip()
 
         if intent == "exit_assistant":
+            # FIXED: previously reused the "exit_assistant" response key,
+            # which is the ASKING text ("Do you want me to shut down?") —
+            # so confirming a shutdown replied by asking again. Now it
+            # reports the real outcome instead.
             if self.system_utils:
                 self.system_utils.shutdown(confirm=True)
-            return self._finish("exit_assistant", {}, packet, executed=True, blocked_reason=None)
+                return self._finish("action_result",
+                                     {"success": True, "action_label": "shut down"},
+                                     packet, executed=True, blocked_reason=None)
+            return self._finish("action_failed", {"error": "System utilities not connected"},
+                                 packet, executed=False, blocked_reason="not_connected")
 
         return self._route_action(intent, packet, text)
 
